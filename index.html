@@ -1,0 +1,3355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>龙骨与废墟 - 艺术强化版</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: "Microsoft YaHei", "Lantinghei SC", "Helvetica", sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+        }
+        canvas { display: block; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            transition: opacity 0.5s;
+        }
+
+        .screen-overlay {
+            pointer-events: auto;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: absolute;
+            top: 0; left: 0;
+        }
+
+        #pause-screen { display: none; }
+
+        .btn {
+            padding: 15px 40px;
+            border: 1px solid #fff;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            transition: all 0.3s;
+            margin: 10px;
+            pointer-events: auto;
+            min-width: 200px;
+        }
+        .btn:hover { background: #fff; color: #000; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="start-screen" class="screen-overlay">
+        <h1 style="font-weight: 100; letter-spacing: 8px;">龙骨与废墟</h1>
+        <p style="opacity: 0.6; margin-bottom: 30px;">这是一段关于寻找的旅程</p>
+        <button class="btn" onclick="initGame()">开启旅程</button>
+    </div>
+
+    <div id="pause-screen" class="screen-overlay">
+        <h2 style="font-weight: 100; letter-spacing: 5px; margin-bottom: 40px;">旅途小憩</h2>
+        <button class="btn" onclick="togglePause()">继续游戏</button>
+        <button class="btn" onclick="jumpTo(100)">重回起点</button>
+        <button class="btn" onclick="jumpTo(6000)">第一个高地</button>
+        <button class="btn" onclick="jumpTo(15250)">集成建筑03</button>
+        <button class="btn" onclick="jumpTo(28500, true)">通天梯</button>
+        <button class="btn" onclick="jumpToScene2()">第二关</button>
+        <button class="btn" onclick="jumpToRampTopRomanColumn()">三角斜坡顶部平台罗马柱</button>
+        <button class="btn" onclick="restartGame()">重新开始</button>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// --- 全局配置与资源 ---
+const SKY_COLOR = '#d1d1d1'; 
+const gitBase = "https://raw.githubusercontent.com/songningying-png/demo-game/refs/heads/main/";
+const assets = {
+    bg: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/bg_0.png',
+    bg1: gitBase + 'Assets/Sprites/Scene2_RedDesert/Parallax/bg_1.png',
+    vista: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_vista2.png',
+    hand: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_hand_statue1.png',
+    building02: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building_02_full.png',
+    building03: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building_03_full.png',
+    building04: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building04_full.png', 
+    ruinsDebris: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_ruins_debris01.png',
+    mtn01: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_mountain01_mid.png',
+    mtn02: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_mountain02_mid.png',
+    run: [1,2,3,4,5,6].map(i => gitBase + `Assets/Sprites/Player/juese_paob_0${i}.png`),
+    idle: [1,2,3].map(i => gitBase + `Assets/Sprites/Player/juese_sanshitu_0${i}.png`),
+    jump: [1,2,3,4,5,6].map(i => gitBase + `Assets/Sprites/Player/juese_tiaoyue_0${i}.png`)
+};
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let width, height, groundH, playerH;
+let windGL = {
+    canvas: null,
+    gl: null,
+    program: null,
+    quadBuffer: null,
+    uniforms: null,
+    fade: 0,
+    targetFade: 0
+};
+let windVideo = {
+    el: null,
+    src: '',
+    opacity: 0
+};
+let skyCurtain = {
+    active: false,
+    startX: 0,
+    startedAt: 0
+};
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.warn('Wind overlay shader error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+    const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    if (!vs || !fs) return null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        console.warn('Wind overlay link error:', gl.getProgramInfoLog(p));
+        gl.deleteProgram(p);
+        return null;
+    }
+    return p;
+}
+
+function syncWindOverlayRect() {
+    if (!windGL.canvas) return;
+    const r = canvas.getBoundingClientRect();
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    windGL.canvas.style.left = `${r.left}px`;
+    windGL.canvas.style.top = `${r.top}px`;
+    windGL.canvas.style.width = `${r.width}px`;
+    windGL.canvas.style.height = `${r.height}px`;
+    const pw = Math.max(2, Math.round(r.width * dpr));
+    const ph = Math.max(2, Math.round(r.height * dpr));
+    if (windGL.canvas.width !== pw || windGL.canvas.height !== ph) {
+        windGL.canvas.width = pw;
+        windGL.canvas.height = ph;
+    }
+    if (windGL.gl) windGL.gl.viewport(0, 0, pw, ph);
+}
+
+function syncWindVideoRect() {
+    if (!windVideo.el) return;
+    const r = canvas.getBoundingClientRect();
+    windVideo.el.style.left = `${r.left}px`;
+    windVideo.el.style.top = `${r.top}px`;
+    windVideo.el.style.width = `${r.width}px`;
+    windVideo.el.style.height = `${r.height}px`;
+}
+
+function destroyWindVideoOverlay() {
+    if (!windVideo.el) return;
+    try {
+        windVideo.el.pause();
+        windVideo.el.removeAttribute('src');
+        windVideo.el.load();
+    } catch (e) {}
+    if (windVideo.el.parentNode) windVideo.el.parentNode.removeChild(windVideo.el);
+    windVideo.el = null;
+    windVideo.opacity = 0;
+}
+
+function ensureWindVideoOverlay() {
+    if (windVideo.el || !windVideo.src) return !!windVideo.el;
+    const v = document.createElement('video');
+    v.id = 'wind-video-overlay';
+    v.playsInline = true;
+    v.muted = true;
+    v.loop = false;
+    v.autoplay = false;
+    v.preload = 'auto';
+    v.src = windVideo.src;
+    v.style.position = 'fixed';
+    v.style.pointerEvents = 'none';
+    v.style.zIndex = '55';
+    v.style.objectFit = 'cover';
+    // 关键：用屏幕混合防止视频黑底压暗主画面
+    v.style.mixBlendMode = 'screen';
+    v.style.opacity = '0';
+    v.style.background = 'transparent';
+    document.body.appendChild(v);
+    windVideo.el = v;
+    syncWindVideoRect();
+    return true;
+}
+
+function setWindVideoSource(src) {
+    windVideo.src = src || '';
+}
+
+function destroyWindOverlay() {
+    if (windGL.gl) {
+        if (windGL.quadBuffer) windGL.gl.deleteBuffer(windGL.quadBuffer);
+        if (windGL.program) windGL.gl.deleteProgram(windGL.program);
+    }
+    if (windGL.canvas && windGL.canvas.parentNode) windGL.canvas.parentNode.removeChild(windGL.canvas);
+    windGL = { canvas: null, gl: null, program: null, quadBuffer: null, uniforms: null, fade: 0, targetFade: 0 };
+}
+
+function ensureWindOverlay() {
+    if (windGL.gl) return true;
+    const overlay = document.createElement('canvas');
+    overlay.id = 'wind-overlay-canvas';
+    overlay.style.position = 'fixed';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.zIndex = '60';
+    overlay.style.background = 'transparent';
+    document.body.appendChild(overlay);
+    const gl = overlay.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: true });
+    if (!gl) {
+        overlay.remove();
+        return false;
+    }
+    const vs = `
+attribute vec2 a_pos;
+void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+    const fs = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform float u_intensity;
+uniform vec2 u_camera;
+uniform float u_alpha;
+
+vec3 mod289(vec3 x){ return x - floor(x*(1.0/289.0))*289.0; }
+vec2 mod289(vec2 x){ return x - floor(x*(1.0/289.0))*289.0; }
+vec3 permute(vec3 x){ return mod289(((x*34.0)+1.0)*x); }
+float snoise(vec2 v){
+    const vec4 C = vec4(0.2113248654,0.3660254038,-0.5773502692,0.0243902439);
+    vec2 i = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = x0.x > x0.y ? vec2(1.0,0.0) : vec2(0.0,1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0,i1.y,1.0)) + i.x + vec3(0.0,i1.x,1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0*fract(p*C.www)-1.0;
+    vec3 h = abs(x)-0.5;
+    vec3 ox = floor(x+0.5);
+    vec3 a0 = x-ox;
+    m *= 1.792842914 - 0.853734721*(a0*a0+h*h);
+    vec3 g;
+    g.x = a0.x*x0.x + h.x*x0.y;
+    g.y = a0.y*x12.x + h.y*x12.y;
+    g.z = a0.z*x12.z + h.z*x12.w;
+    return 130.0 * dot(m, g);
+}
+
+float hash21(vec2 p){
+    p = fract(p * vec2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
+}
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    
+    // 垂直范围：大风云雾约占屏幕高度 80%（中心带满强度，上下约各 10% 渐隐）
+    float vHeightMask = 1.0 - smoothstep(0.40, 0.48, abs(uv.y - 0.5));
+    
+    // 1. 矫正屏幕比例，防止噪声在宽屏下被横向拉伸成条纹
+    vec2 aspectUv = vec2(uv.x * (u_resolution.x / u_resolution.y), uv.y);
+    
+    float w = clamp(u_intensity / 100.0, 0.0, 1.0);
+    float t = u_time;
+    vec2 cam = u_camera * 0.00005; 
+
+    // 基础流动速度（略缓，偏风卷云雾）
+    float speed = t * (0.11 + w * 0.55) + cam.x;
+
+    // 2. Domain Warping (坐标扭曲)
+    vec2 warp;
+    warp.x = snoise(aspectUv * 1.85 + vec2(speed * 0.45, cam.y));
+    warp.y = snoise(aspectUv * 1.85 + vec2(cam.y, speed * 0.38));
+
+    // 3. 主云团 + 低频雾层，柔化边缘、偏云雾感而非实体烟块
+    float n = snoise(aspectUv * 1.05 + warp * 0.55 + vec2(speed, cam.y));
+    n = n * 0.5 + 0.5;
+    float mist = snoise(aspectUv * 0.62 + vec2(speed * 0.22, -speed * 0.12 + cam.y * 0.35));
+    mist = mist * 0.5 + 0.5;
+    float nSoft = mix(n, n * 0.48 + mist * 0.52, 0.52);
+
+    // 4. 遮罩：更宽的 smoothstep，浓度略柔
+    float threshold = 1.0 - (w * 1.12);
+    float mask = smoothstep(threshold - 0.14, threshold + 0.38, nSoft);
+
+    // 5. Gris 向：带灰紫雾感的暗红，高光偏雾粉
+    vec3 colorDark = vec3(0.14, 0.06, 0.10);
+    vec3 colorLight = vec3(0.58, 0.36, 0.44);
+    vec3 inkCol = mix(colorDark, colorLight, pow(nSoft, 0.82));
+
+    // 碎石粒子（受风推挤的亮暗斑点/短线）
+    float debris = 0.0;
+    for (int i = 0; i < 18; i++) {
+        float fi = float(i);
+        float seed = fi * 11.7;
+        float px = fract(hash21(vec2(seed, 1.3)) + t * (0.08 + w * 1.5) + cam.x * 2.0);
+        float py = fract(hash21(vec2(seed, 8.9)) + sin(t * 0.9 + fi) * 0.08 + cam.y * 0.8);
+        vec2 p = vec2(px, py);
+        vec2 d = uv - p;
+        d.x *= 1.8;
+        float core = exp(-dot(d, d) * (320.0 - 140.0 * w));
+        float tail = exp(-dot(vec2(d.x + 0.02 + 0.08*w, d.y), vec2(d.x + 0.02 + 0.08*w, d.y)) * 170.0);
+        debris += core * 0.35 + tail * 0.22;
+    }
+    debris = clamp(debris, 0.0, 1.0);
+    debris *= vHeightMask;
+
+    // 7. 最终 Alpha：云雾主体略透明，与 vHeightMask 相乘
+    float alpha = clamp(mask * 0.78 + debris * (0.14 + 0.52 * w), 0.0, 1.0);
+    alpha *= vHeightMask;
+    alpha *= u_alpha;
+    
+    vec3 col = mix(inkCol, vec3(0.14, 0.06, 0.09), debris * 0.72);
+    gl_FragColor = vec4(col * alpha, alpha);
+}`;
+    const program = createProgram(gl, vs, fs);
+    if (!program) {
+        overlay.remove();
+        return false;
+    }
+    const quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 1, -1, -1, 1,
+        -1, 1, 1, -1, 1, 1
+    ]), gl.STATIC_DRAW);
+    windGL.canvas = overlay;
+    windGL.gl = gl;
+    windGL.program = program;
+    windGL.quadBuffer = quad;
+    windGL.uniforms = {
+        aPos: gl.getAttribLocation(program, 'a_pos'),
+        uResolution: gl.getUniformLocation(program, 'u_resolution'),
+        uTime: gl.getUniformLocation(program, 'u_time'),
+        uIntensity: gl.getUniformLocation(program, 'u_intensity'),
+        uCamera: gl.getUniformLocation(program, 'u_camera'),
+        uAlpha: gl.getUniformLocation(program, 'u_alpha')
+    };
+    syncWindOverlayRect();
+    return true;
+}
+
+function renderWindOverlay() {
+    if (!windGL.gl) return;
+    const gl = windGL.gl;
+    syncWindOverlayRect();
+    gl.useProgram(windGL.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, windGL.quadBuffer);
+    gl.enableVertexAttribArray(windGL.uniforms.aPos);
+    gl.vertexAttribPointer(windGL.uniforms.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(windGL.uniforms.uResolution, windGL.canvas.width, windGL.canvas.height);
+    gl.uniform1f(windGL.uniforms.uTime, performance.now() * 0.001);
+    gl.uniform1f(windGL.uniforms.uIntensity, windTransition.intensity);
+    gl.uniform2f(windGL.uniforms.uCamera, camera.x, camera.y);
+    gl.uniform1f(windGL.uniforms.uAlpha, windGL.fade);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function updateWindOverlayLifecycle() {
+    // 已改为视频转场方案：停用原代码的大风 WebGL 叠加层
+    if (windGL.gl) destroyWindOverlay();
+    return;
+}
+
+// 默认风视频路径（你可替换为自己的素材路径）
+setWindVideoSource('./assets/wind-transition.mp4');
+
+const terrainParams = {
+    bX2: 4000, b2ImageX: 3200, peakOffset2: 2200, peakRadius2: 120, h2Ratio: 0.55, climbAngle2: 40,
+    midHill: { x: 9000, w: 1800, h: 420 },
+    bX3: 13500, w3: 3500, h3: 880, peakOffset3: 1750, peakRadius3: 350,
+    bX4: 18800, h4: 750, angleL: 23.3, angleR: 69.7, peakRadius4: 150,
+    bX5: 24000, stairX: 28500 
+};
+
+let player = {
+    x: 100, y: 0, vx: 0, vy: 0, width: 0, height: 0, 
+    grounded: false, speed: 10, accel: 0.8, jumpForce: -16, 
+    maxJumps: 2, jumpCount: 0,
+    facing: 1, state: 'idle', frame: 0, frameTimer: 0,
+    inputLocked: false, rotation: 0,
+    collectedCount: 0,
+    followingParticles: [], // {x, y, targetX, targetY, trail:[]}
+    /** 虚空斗篷链世界坐标，索引 0 贴肩 */
+    capeChain: []
+};
+
+// --- 系统状态 ---
+let specialOrb = { x: 6200, y: 0, triggered: false, alpha: 1, finalized: false };
+let specialOrb2 = { x: 0, y: 0, triggered: false, alpha: 1, finalized: false };
+let debrisOrb = { x: 0, y: 0, triggered: false, finalized: false, pulse: 0 };
+let platformTopOrb = { x: 0, y: 0, triggered: false, finalized: false, pulse: 0 };
+let ringParticles = [];
+let expansionRings = []; 
+let holyRings = [];
+let poemData = { alpha: 0, show: false, state: 'idle', lines: [], timer: 0, isFirst: true };
+let giantBird = { x: 0, y: 0, active: false, alpha: 0, flap: 0 }; 
+let ambientStorm = []; 
+let stones = []; 
+let weapons = []; // ✨ 剑和戟
+let vegetation = [];
+let romanColumns = []; 
+let skyStairs = []; 
+let birdsSwarm = [];
+let whiteBirds = [];
+let mtn01Instances = []; 
+let mtn02Instances = [];
+let snowPiles = [];
+let redFlowers = [];
+let watercolorBlobs = [];
+let mountainTreesFar = [];
+let mountainTreesNear = [];
+let floatingShards = [];
+let rubbleDragonbonesMid = [];
+let farRectTriPeaks = [];
+const SCENE2_RAMP_START_X = 32500;
+const SCENE2_RAMP_RUN_MS = 20000;
+const SCENE2_CLIFF_START_X = 40000;
+const SCENE2_CLIFF_END_X = 40800;
+const SCENE2_ARCH_BRIDGE_START_X = 40600;
+const SCENE2_ARCH_BRIDGE_WIDTH = 14000;
+const SCENE2_ARCH_BRIDGE_END_X = SCENE2_ARCH_BRIDGE_START_X + SCENE2_ARCH_BRIDGE_WIDTH;
+const SCENE2_ARCH_COUNT = 20;
+const SCENE2_ARCH_BRIDGE_HEIGHT = 8103;
+const SCENE2_ARCH_BRIDGE_DECK_THICKNESS = 20;
+const SCENE2_CLIFF_FLOOR_DROP = 150; // 断崖坑底下沉幅度（保持可见，不掉出镜头）
+const SCENE2_SHARDS_SHOW_BLEND = 0.985; // 场景渐变接近完成后再显示悬浮碎石
+const SCENE2_SHARDS_REVEAL_MIN_MS = 900;
+const SCENE2_SHARDS_REVEAL_MAX_MS = 1800;
+const WIND_VIDEO_TOTAL_MS = 12000; // 大风视频阶段总时长
+const WIND_VIDEO_LOOPS = 2; // 大风视频播放遍数
+const SCENE2_RAMP_SLOPE = 1.0; // X前进1，Y上升1，45度
+const SCENE2_RAMP_CAMERA_ANCHOR = 0.78; // 斜坡段人物保持在屏幕约4/5处（坡面约1/4稍多）
+const SCENE2_RAMP_DRAW_EXTEND = 12; // 顶部平地向右延伸倍数，避免露背景
+const SCENE2_PLATFORM_REVEAL_MS = 1700; // 平台出现的缓动时长，避免突然弹出
+const SCENE2_RAMP_TOOTH_RUN = 14; // 锯齿每级台阶宽度
+const SCENE2_RAMP_TOOTH_RISE = SCENE2_RAMP_TOOTH_RUN * SCENE2_RAMP_SLOPE; // 与坡度一致
+const SCENE2_RAMP_FOOT_EDGE_OFFSET = 3; // 让人物脚底更贴边缘上方
+const SCENE2_SKY_COLUMN_X = 33580;
+const SCENE2_SKY_COLUMN_HEIGHT_RATIO = 5.0;
+let scene2Ramp = {
+    started: false,
+    startAt: 0,
+    climbAccumMs: 0,
+    lastTick: 0,
+    lastX: 0,
+    unlockedAt: 0,
+    flatUnlocked: false,
+    flatStartX: 0,
+    flatY: 0,
+    apexX: 0,
+    apexY: 0
+};
+
+function scene2RampEdgeY(worldX) {
+    const baseGround = height - groundH;
+    const climbDx = Math.max(0, worldX - SCENE2_RAMP_START_X);
+    // 物理高度保持连续斜率：贴着锯齿边缘走，但不产生踩台阶抖动
+    return baseGround - (climbDx * SCENE2_RAMP_SLOPE) - SCENE2_RAMP_FOOT_EDGE_OFFSET;
+}
+
+function scene2RampEdgeYVisual(worldX) {
+    const baseGround = height - groundH;
+    const climbDx = Math.max(0, worldX - SCENE2_RAMP_START_X);
+    const stepIndex = Math.floor(climbDx / SCENE2_RAMP_TOOTH_RUN);
+    return baseGround - (stepIndex * SCENE2_RAMP_TOOTH_RISE);
+}
+
+function appendRampEdgePath(ctx, startWorldX, endWorldX) {
+    const startX = startWorldX - camera.x;
+    let currWorldX = startWorldX;
+    let currY = scene2RampEdgeYVisual(currWorldX);
+    ctx.lineTo(startX, currY);
+    while (currWorldX < endWorldX) {
+        const nextWorldX = Math.min(endWorldX, currWorldX + SCENE2_RAMP_TOOTH_RUN);
+        const nextX = nextWorldX - camera.x;
+        ctx.lineTo(nextX, currY); // 台阶踏面（水平）
+        if (nextWorldX < endWorldX) {
+            const nextY = scene2RampEdgeYVisual(nextWorldX);
+            if (nextY !== currY) ctx.lineTo(nextX, nextY); // 台阶立面（竖直）
+            currY = nextY;
+        }
+        currWorldX = nextWorldX;
+    }
+}
+
+function getScene2ArchBridgeDeckY() {
+    if (scene2Ramp.flatUnlocked && scene2Ramp.flatStartX <= SCENE2_ARCH_BRIDGE_START_X) {
+        return scene2Ramp.flatY;
+    }
+    return scene2RampEdgeY(SCENE2_ARCH_BRIDGE_START_X);
+}
+
+function getPlatformTopOrbWorldPos() {
+    const x = scene2Ramp.flatUnlocked ? (scene2Ramp.flatStartX + 170) : (SCENE2_RAMP_START_X + 170);
+    const yBase = scene2Ramp.flatUnlocked ? scene2Ramp.flatY : scene2RampEdgeY(x);
+    return { x, y: yBase - 220 };
+}
+/** 第二关视觉强度：仅 0 或 1（由虚空落地瞬间切满，不再做爆炸渐变） */
+let transition = { scene2Blend: 0, shake: 0 };
+let windTransition = {
+    phase: 'idle', // idle -> approach -> hold -> video -> done
+    triggerX: 0,
+    columnX: 0,
+    startedAt: 0,
+    phaseAt: 0,
+    intensity: 0,
+    blendStart: 0,
+    blendTarget: 1,
+    autoStopX: 0,
+    videoFadeInDone: false,
+    touchedStairTop: false,
+    armedAfterDrop: false,
+    done: false
+};
+let debugWindHUD = true;
+
+const VOID_FALL_MS = 20000;
+const VOID_BG1_START_MS = 10000;
+/** 离开台边后延迟多久再切到「下坠」体态（非跳跃） */
+const VOID_FALL_POSE_DELAY_MS = 720;
+const VOID_EYE_MS = 8000;
+const VOID_EYE_FOLLOW_DIST = 200;
+const VOID_EYE_CLOSE_MS = 1600;
+/** 虚空下落子状态：freeFall -> hardLanding -> recoverStand -> 结束转 eyeFollow */
+let voidFall = {
+    phase: 'idle',
+    fallState: 'idle',
+    wasOnTop: false,
+    startTime: 0,
+    startPlayerY: 0,
+    prevPlayerY: 0,
+    camStartX: 0,
+    camStartY: 0,
+    camVelY: 0,
+    prevPlayerX: 0,
+    eyeFollowDist: 0,
+    eyeCloseStart: 0,
+    risePad: 0,
+    hardLandAt: 0,
+    recoverAt: 0
+};
+
+/** 虚空全屏竖线流星（屏幕坐标，多层速度） */
+let voidLineMeteors = { list: [] };
+
+/** 落地事件：灰尘 + 屏幕震动。扩展：landingFx.onLandCallbacks.push((ev) => { ev.x, ev.y脚底世界坐标 }) */
+let landingFx = {
+    dust: [],
+    onLandCallbacks: []
+};
+
+const VOID_TERM_VELOCITY = 9.2;
+const VOID_GRAVITY = 0.42;
+const VOID_CAM_SMOOTH_TIME = 0.26;
+const VOID_CAM_LAND_SMOOTH_TIME = 0.52;
+const VOID_CAM_LOOKAHEAD_Y = 1.22;
+const HARD_LANDING_MS = 280;
+const RECOVER_STAND_MS = 380;
+
+let voidBlendCanvas = null;
+function getVoidBlendCanvas() {
+    if (!voidBlendCanvas || voidBlendCanvas.width !== width || voidBlendCanvas.height !== height) {
+        voidBlendCanvas = document.createElement('canvas');
+        voidBlendCanvas.width = width;
+        voidBlendCanvas.height = height;
+    }
+    return voidBlendCanvas;
+}
+
+const gravity = 0.7;
+const friction = 0.85;
+let gameState = 'MENU';
+let camera = { x: 0, y: 0, zoom: 1, targetZoom: 1, targetY: 0, shakeLand: 0 };
+const images = { run: [], idle: [], jump: [] };
+let loadedCount = 0;
+
+function isImageReady(img) { return img && img.complete && img.naturalWidth !== 0; }
+
+function loadImages() {
+    ['bg', 'bg1', 'vista', 'hand', 'building02', 'building03', 'building04', 'ruinsDebris', 'mtn01', 'mtn02'].forEach(key => {
+        images[key] = new Image(); images[key].src = assets[key];
+        images[key].onload = () => loadedCount++;
+    });
+    ['run', 'idle', 'jump'].forEach(key => {
+        assets[key].forEach((src, idx) => {
+            const img = new Image(); img.src = src; 
+            img.onload = () => loadedCount++;
+            images[key][idx] = img;
+        });
+    });
+}
+
+function getTerrainPoints() {
+    const h = height * terrainParams.h2Ratio;
+    const peakX = terrainParams.bX2 + terrainParams.peakOffset2;
+    const start = peakX - h / Math.tan(terrainParams.climbAngle2 * Math.PI / 180);
+    const end = peakX + h / Math.tan(60 * Math.PI / 180);
+    return { start, peak: peakX, end, h };
+}
+
+function getTerrain4Points() {
+    const b4 = terrainParams;
+    const dxL = b4.h4 / Math.tan(b4.angleL * Math.PI / 180);
+    const dxR = b4.h4 / Math.tan(b4.angleR * Math.PI / 180);
+    return { start: b4.bX4, peak: b4.bX4 + dxL, end: b4.bX4 + dxL + dxR, h: b4.h4 };
+}
+
+function getGroundHeight(worldX, currentY) {
+    const baseGround = height - groundH;
+    if (worldX >= SCENE2_ARCH_BRIDGE_START_X && worldX <= SCENE2_ARCH_BRIDGE_END_X) {
+        // 桥面顶部是实心水平矩形碰撞体
+        return getScene2ArchBridgeDeckY();
+    }
+    if (worldX >= SCENE2_RAMP_START_X) {
+        if (scene2Ramp.flatUnlocked && worldX >= scene2Ramp.flatStartX) {
+            return scene2Ramp.flatY;
+        }
+        // 45度角向上，X前进多少，Y就减少多少
+        return scene2RampEdgeY(worldX);
+    }
+    for (let stair of skyStairs) {
+        const marginX = stair.w / 2;
+        if (worldX >= stair.x - marginX && worldX <= stair.x + marginX) {
+            if (currentY + player.height <= stair.y + 15 && currentY + player.height >= stair.y - 45) {
+                return stair.y;
+            }
+        }
+    }
+    const handX = 1500, handW = 600;
+    if (worldX > handX && worldX < handX + handW) {
+        const t = (worldX - handX) / handW;
+        const handTop = baseGround - Math.sin(t * Math.PI) * 250;
+        if (currentY + player.height <= handTop + 50) return handTop;
+    }
+    const pts2 = getTerrainPoints();
+    if (worldX >= pts2.start && worldX <= pts2.end) {
+        if (worldX > pts2.peak - 50 && worldX < pts2.peak + 50) return baseGround - pts2.h;
+        if (worldX < pts2.peak) return baseGround - ((worldX - pts2.start) / (pts2.peak - pts2.start)) * pts2.h;
+        else return (baseGround - pts2.h) + ((worldX - pts2.peak) / (pts2.end - pts2.peak)) * pts2.h;
+    }
+    const hill = terrainParams.midHill;
+    if (worldX >= hill.x && worldX <= hill.x + hill.w) {
+        const t = (worldX - hill.x) / hill.w;
+        return baseGround - (t < 0.5 ? (t/0.5)*hill.h : (1-t)/0.5*hill.h);
+    }
+    const b3 = terrainParams;
+    if (worldX >= b3.bX3 && worldX <= b3.bX3 + b3.w3) {
+        const p3 = b3.bX3 + b3.peakOffset3;
+        if (worldX > p3 - 100 && worldX < p3 + 100) return baseGround - b3.h3;
+        if (worldX < p3) return baseGround - ((worldX - b3.bX3) / (p3 - b3.bX3)) * b3.h3;
+        else return (baseGround - b3.h3) + ((worldX - p3) / (b3.w3 - b3.peakOffset3)) * b3.h3;
+    }
+    const pts4 = getTerrain4Points();
+    if (worldX >= pts4.start && worldX <= pts4.end) {
+        if (worldX > pts4.peak - 50 && worldX < pts4.peak + 50) return baseGround - pts4.h;
+        if (worldX < pts4.peak) return baseGround - ((worldX - pts4.start) / (pts4.peak - pts4.start)) * pts4.h;
+        else return (baseGround - pts4.h) + ((worldX - pts4.peak) / (pts4.end - pts4.peak)) * pts4.h;
+    }
+    return baseGround;
+}
+
+/**
+ * 脚底 ShapeCast：在脚部宽度上多点采样，取最高地面（最早接触）。
+ */
+function shapeCastGroundAtFeet(worldX, bodyTopY, footWorldY, halfFootW) {
+    const hw = Math.max(2, halfFootW ||0);
+    const xs = [worldX - hw, worldX, worldX + hw];
+    let maxG = -1e9;
+    for (let i = 0; i < xs.length; i++) {
+        const g = getGroundHeight(xs[i], bodyTopY);
+        maxG = Math.max(maxG, g);
+    }
+    return maxG;
+}
+
+/** Unity 风格 SmoothDamp 标量（Y 轴镜头） */
+function smoothDampScalarY(current, target, velRef, smoothTime, dt) {
+    const st = Math.max(0.0001, smoothTime);
+    const omega = 2 / st;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = current - target;
+    const temp = (velRef + omega * change) * dt;
+    const newVel = (velRef - omega * temp) * exp;
+    const newPos = target + (change + temp) * exp;
+    return { pos: newPos, vel: newVel };
+}
+
+function easeInOut01(t) {
+    const u = Math.max(0, Math.min(1, t));
+    return u * u * (3 - 2 * u);
+}
+
+function initWindTransitionMarker() {
+    // 需要从通天梯下来后，再往后跑一段才触发
+    windTransition.columnX = terrainParams.stairX + 1680;
+    windTransition.triggerX = windTransition.columnX - 240;
+    windTransition.phase = 'idle';
+    windTransition.startedAt = 0;
+    windTransition.phaseAt = 0;
+    windTransition.intensity = 0;
+    windTransition.blendStart = transition.scene2Blend;
+    windTransition.blendTarget = 1;
+    windTransition.autoStopX = 0;
+    windTransition.videoFadeInDone = false;
+    windTransition.touchedStairTop = false;
+    windTransition.armedAfterDrop = false;
+    windTransition.done = false;
+    skyCurtain.active = false;
+    skyCurtain.startX = 0;
+    skyCurtain.startedAt = 0;
+    destroyWindVideoOverlay();
+}
+
+function tryStartWindTransition() {
+    if (windTransition.done || windTransition.phase !== 'idle') return;
+    if (transition.scene2Blend > 0.99) {
+        windTransition.done = true;
+        return;
+    }
+    if (!windTransition.armedAfterDrop) return;
+    if (player.x < windTransition.triggerX) return;
+    if (voidFall.phase === 'falling') return;
+    windTransition.phase = 'approach';
+    windTransition.startedAt = performance.now();
+    windTransition.phaseAt = performance.now();
+    windTransition.blendStart = transition.scene2Blend;
+    windTransition.autoStopX = player.x + Math.max(95, player.width * 4.6);
+    windTransition.videoFadeInDone = false;
+    player.inputLocked = true;
+    player.vx = 0;
+}
+
+function updateWindTransition() {
+    const now = performance.now();
+    if (windTransition.phase === 'idle' || windTransition.done) {
+        windTransition.intensity *= 0.92;
+        transition.shake *= 0.9;
+        return;
+    }
+
+    const dt = now - windTransition.phaseAt;
+    if (windTransition.phase === 'approach') {
+        player.vx = 1.9;
+        player.x += player.vx;
+        player.facing = 1;
+        windTransition.intensity = 28;
+        if (player.x >= windTransition.autoStopX || dt >= 1500) {
+            player.vx = 0;
+            windTransition.phase = 'hold';
+            windTransition.phaseAt = now;
+        }
+    } else if (windTransition.phase === 'hold') {
+        windTransition.intensity = 45 + Math.sin(now * 0.01) * 8;
+        transition.shake = 0.14 + Math.sin(now * 0.03) * 0.1;
+        player.vx = 0;
+        if (dt >= 2000) {
+            windTransition.phase = 'video';
+            windTransition.phaseAt = now;
+            windTransition.blendStart = transition.scene2Blend;
+            if (ensureWindVideoOverlay() && windVideo.el) {
+                windVideo.el.currentTime = 0;
+                windVideo.el.loop = false;
+                windVideo.el.playbackRate = 1;
+                if (windVideo.el.readyState >= 1 && Number.isFinite(windVideo.el.duration) && windVideo.el.duration > 0.01) {
+                    const targetRate = (windVideo.el.duration * WIND_VIDEO_LOOPS) / (WIND_VIDEO_TOTAL_MS / 1000);
+                    windVideo.el.playbackRate = Math.max(0.25, Math.min(4, targetRate));
+                } else {
+                    const onMeta = () => {
+                        if (!windVideo.el) return;
+                        if (Number.isFinite(windVideo.el.duration) && windVideo.el.duration > 0.01) {
+                            const targetRate = (windVideo.el.duration * WIND_VIDEO_LOOPS) / (WIND_VIDEO_TOTAL_MS / 1000);
+                            windVideo.el.playbackRate = Math.max(0.25, Math.min(4, targetRate));
+                        }
+                    };
+                    windVideo.el.addEventListener('loadedmetadata', onMeta, { once: true });
+                }
+                const pp = windVideo.el.play();
+                if (pp && typeof pp.catch === 'function') pp.catch(() => {});
+            }
+        }
+    } else if (windTransition.phase === 'video') {
+        const u = easeInOut01(dt / WIND_VIDEO_TOTAL_MS);
+        windTransition.intensity = 74 + Math.sin(now * 0.013) * 12;
+        transition.shake = 0.34 + Math.sin(now * 0.028) * 0.18;
+        transition.scene2Blend = Math.max(transition.scene2Blend, windTransition.blendStart + (1 - windTransition.blendStart) * u);
+        if (windVideo.el) {
+            if (windVideo.el.readyState >= 2) {
+                // 视频仅做风效叠加，不做遮挡，避免“黑屏”观感
+                const targetVideoAlpha = (0.12 + 0.38 * Math.sin(u * Math.PI)) * (0.65 + 0.35 * (1 - u));
+                windVideo.opacity += (targetVideoAlpha - windVideo.opacity) * 0.18;
+                windVideo.el.style.opacity = `${Math.max(0, Math.min(0.48, windVideo.opacity))}`;
+            } else {
+                windVideo.el.style.opacity = '0';
+            }
+        }
+        if (dt >= WIND_VIDEO_TOTAL_MS) {
+            windTransition.phase = 'done';
+            windTransition.done = true;
+            windTransition.intensity = 0;
+            transition.scene2Blend = 1;
+            player.inputLocked = false;
+            player.vx = 0;
+            transition.shake = 0;
+            destroyWindVideoOverlay();
+        }
+    }
+}
+
+function initVoidLineMeteors() {
+    voidLineMeteors.list = [];
+    const layers = [
+        { n: 70, baseV: 11, vJ: 7 },
+        { n: 95, baseV: 18, vJ: 10 },
+        { n: 120, baseV: 26, vJ: 14 }
+    ];
+    layers.forEach((L, li) => {
+        for (let i = 0; i < L.n; i++) {
+            voidLineMeteors.list.push({
+                x: Math.random() * width,
+                y: (Math.random() < 0.58 ? Math.random() * height * 0.58 : height * 0.38 + Math.random() * (height * 0.72 + 140)) - 140,
+                len: 5 + Math.pow(Math.random(), 1.4) * 92,
+                vy: L.baseV + Math.random() * L.vJ,
+                alpha: 0.12 + Math.random() * 0.78,
+                lw: Math.random() > 0.75 ? 1.35 : 1,
+                layer: li
+            });
+        }
+    });
+}
+
+function updateVoidLineMeteors(fallVy) {
+    const boost = Math.min(22, 3.5 + Math.abs(fallVy || 0) * 0.45);
+    voidLineMeteors.list.forEach(p => {
+        const sp = p.vy + boost * (0.28 + p.layer * 0.26);
+        p.y -= sp;
+        if (p.y + p.len < -30) {
+            p.y = height + 25 + Math.random() * 220;
+            p.x = Math.random() * width;
+            if (Math.random() < 0.5) p.y = height * 0.15 + Math.random() * height * 0.5;
+        }
+    });
+}
+
+function drawVoidLineMeteorsScreen() {
+    if (!voidLineMeteors.list.length) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    voidLineMeteors.list.forEach(p => {
+        const g = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.len);
+        g.addColorStop(0, `rgba(255,255,255,${p.alpha * 0.95})`);
+        g.addColorStop(0.5, `rgba(255,255,255,${p.alpha * 0.32})`);
+        g.addColorStop(1, `rgba(255,255,255,${p.alpha * 0.04})`);
+        ctx.strokeStyle = g;
+        ctx.lineWidth = p.lw;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x, p.y + p.len);
+        ctx.stroke();
+    });
+    ctx.restore();
+}
+
+function triggerVoidLandingEvent(footWorldX, footWorldY) {
+    landingFx.onLandCallbacks.forEach(fn => {
+        try { fn({ x: footWorldX, y: footWorldY }); } catch (e) {}
+    });
+    camera.shakeLand = Math.max(camera.shakeLand, 8);
+    for (let i = 0; i < 28; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 1.5 + Math.random() * 5.5;
+        landingFx.dust.push({
+            x: footWorldX + (Math.random() - 0.5) * 40,
+            y: footWorldY,
+            vx: Math.cos(a) * s,
+            vy: -Math.random() * 3.2 - 0.8,
+            life: 1,
+            size: 1.2 + Math.random() * 2.4,
+            drag: 0.96
+        });
+    }
+}
+
+function updateLandingFxDust() {
+    for (let i = landingFx.dust.length - 1; i >= 0; i--) {
+        const d = landingFx.dust[i];
+        d.x += d.vx;
+        d.y += d.vy;
+        d.vy += 0.12;
+        d.vx *= d.drag;
+        d.life -= 0.028;
+        if (d.life <= 0) landingFx.dust.splice(i, 1);
+    }
+    if (camera.shakeLand > 0.02) camera.shakeLand *= 0.86;
+    else camera.shakeLand = 0;
+}
+
+function updateVoidCapeChain() {
+    const shoulderX = player.x + player.width * 0.52 - player.facing * player.width * 0.35;
+    const shoulderY = player.y + player.height * 0.3;
+    const wind = Math.sin(performance.now() * 0.008) * 6 + player.vy * 0.35;
+    if (!player.capeChain || player.capeChain.length < 6) {
+        player.capeChain = [];
+        for (let i = 0; i < 6; i++) player.capeChain.push({ x: shoulderX, y: shoulderY + i * 12 });
+    }
+    player.capeChain[0].x = shoulderX;
+    player.capeChain[0].y = shoulderY;
+    for (let i = 1; i < player.capeChain.length; i++) {
+        const prev = player.capeChain[i - 1];
+        const cur = player.capeChain[i];
+        const tx = prev.x - player.facing * (10 + i * 6) + wind * (0.15 * i);
+        const ty = prev.y + 11 + i * 1.2 + Math.abs(player.vy) * 0.08;
+        cur.x += (tx - cur.x) * (0.22 + i * 0.06);
+        cur.y += (ty - cur.y) * (0.22 + i * 0.06);
+    }
+}
+
+function drawVoidCapeBehindPlayer() {
+    if (!player.capeChain || player.capeChain.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(28,22,26,0.55)';
+    ctx.lineWidth = Math.max(5, player.width * 0.22);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    const c0 = player.capeChain[0];
+    ctx.moveTo(c0.x - camera.x, c0.y);
+    for (let i = 1; i < player.capeChain.length; i++) {
+        const c = player.capeChain[i];
+        ctx.lineTo(c.x - camera.x, c.y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(55,40,48,0.35)';
+    ctx.lineWidth = Math.max(2, player.width * 0.1);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawLandingDustWorld() {
+    landingFx.dust.forEach(d => {
+        ctx.globalAlpha = Math.max(0, d.life);
+        ctx.fillStyle = `rgba(230,220,225,${0.55 * d.life})`;
+        ctx.beginPath();
+        ctx.arc(d.x - camera.x, d.y, d.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+function initDecorations() {
+    ambientStorm = []; stones = []; ringParticles = []; vegetation = []; romanColumns = []; 
+    birdsSwarm = []; mtn01Instances = []; mtn02Instances = []; skyStairs = []; expansionRings = []; holyRings = [];
+    whiteBirds = []; snowPiles = []; redFlowers = []; watercolorBlobs = []; mountainTreesFar = []; mountainTreesNear = [];
+    floatingShards = [];
+    rubbleDragonbonesMid = [];
+    farRectTriPeaks = [];
+    scene2Ramp.started = false;
+    scene2Ramp.startAt = 0;
+    scene2Ramp.climbAccumMs = 0;
+    scene2Ramp.lastTick = 0;
+    scene2Ramp.lastX = 0;
+    scene2Ramp.unlockedAt = 0;
+    scene2Ramp.flatUnlocked = false;
+    scene2Ramp.flatStartX = 0;
+    scene2Ramp.flatY = 0;
+    scene2Ramp.apexX = 0;
+    scene2Ramp.apexY = 0;
+    weapons = []; // ✨
+    specialOrb.triggered = false; specialOrb.finalized = false;
+    specialOrb2.triggered = false; specialOrb2.finalized = false;
+    debrisOrb.triggered = false; debrisOrb.finalized = false; debrisOrb.pulse = 0;
+    platformTopOrb.triggered = false; platformTopOrb.finalized = false; platformTopOrb.pulse = 0;
+    transition.scene2Blend = 0;
+    transition.shake = 0;
+    voidFall.phase = 'idle';
+    voidFall.wasOnTop = false;
+    voidFall.startTime = 0;
+    voidFall.prevPlayerX = 0;
+    voidFall.eyeFollowDist = 0;
+    voidFall.eyeCloseStart = 0;
+    voidFall.startPlayerY = 0;
+    voidFall.prevPlayerY = 0;
+    voidFall.camStartX = 0;
+    voidFall.camStartY = 0;
+    voidFall.camVelY = 0;
+    voidFall.fallState = 'idle';
+    voidFall.risePad = 0;
+    voidFall.hardLandAt = 0;
+    voidFall.recoverAt = 0;
+    voidLineMeteors.list = [];
+    initWindTransitionMarker();
+    landingFx.dust = [];
+    camera.shakeLand = 0;
+    poemData.alpha = 0; poemData.show = false;
+    player.collectedCount = 0; player.followingParticles = []; player.capeChain = []; player.inputLocked = false;
+
+    [800, 11000, 22000, 36000].forEach(x => mtn01Instances.push({x}));
+    [5200, 15000, 27000].forEach(x => mtn02Instances.push({x}));
+
+    // 初始化武器
+    for(let i=0; i<35; i++) {
+        weapons.push({
+            x: Math.random() * 60000,
+            type: Math.random() > 0.5 ? 'sword' : 'halberd',
+            depth: Math.random(), // 0 前, 1 后
+            rotation: (Math.random() - 0.5) * 0.4,
+            scale: 0.6 + Math.random() * 0.4
+        });
+    }
+
+    const stairStart = terrainParams.stairX;
+    const totalStairH = height * 1.5;
+    const stepH = 40, stepW = 180;
+    let curX = stairStart, curY = height - groundH - 30;
+    let stepCount = Math.floor(totalStairH / (stepH * 1.5));
+    let direction = 1; 
+
+    for(let i=0; i<stepCount; i++) {
+        let plant = (Math.random() > 0.6) ? { h: 60+Math.random()*80, growth: 0, thickness: 8+Math.random()*8, antennaH: 20+Math.random()*30 } : null;
+        skyStairs.push({ x: curX, y: curY, w: stepW, h: stepH, plant: plant });
+        curY -= stepH * 1.8;
+        curX += (stepW * 0.7) * direction;
+        if (i > 0 && i % 6 === 0) { direction *= -1; curX += stepW * 0.9 * direction; }
+    }
+    const topX = curX, topY = curY;
+    skyStairs.push({ x: topX, y: topY, w: 500, h: 50, isTop: true, plant: null });
+    specialOrb2.x = topX; specialOrb2.y = topY - 70;
+    // 参考标注图：放到圆形镂空内偏右下位置
+    debrisOrb.x = terrainParams.bX5 + 255;
+    debrisOrb.y = getGroundHeight(debrisOrb.x, Number.POSITIVE_INFINITY) - 210;
+    const orbPos = getPlatformTopOrbWorldPos();
+    platformTopOrb.x = orbPos.x;
+    platformTopOrb.y = orbPos.y;
+    platformTopOrb.triggered = false;
+    platformTopOrb.finalized = false;
+    platformTopOrb.pulse = 0;
+
+    const colCount = 13;
+    for(let i=0; i<colCount; i++) {
+        let colX = 1000 + Math.random() * 55000;
+        const colBlocks = []; let curColY = 0; const targetTotalH = height * 2.1; 
+        const baseW = 20 + Math.random() * 30;
+        while (Math.abs(curColY) < targetTotalH) {
+            const bh = 10 + Math.random()*30, bw = baseW * (0.7+Math.random()*0.6);
+            colBlocks.push({ w: bw, h: bh, y: curColY - bh }); curColY -= bh;
+        }
+        romanColumns.push({ x: colX, blocks: colBlocks });
+    }
+
+    for(let i=0; i<120; i++) ambientStorm.push({x: Math.random() * width, y: Math.random() * height, size: 1 + Math.random() * 2, vx: -2 - Math.random() * 4, vy: 0.5 + Math.random() * 0.5, alpha: 0.1 + Math.random() * 0.4});
+    for(let i=0; i<100; i++) stones.push({x: Math.random() * 60000, points: Array.from({length:6}, (_,j)=>({x:Math.cos(j)*20, y:Math.sin(j)*20})), scale: 0.3+Math.random()*1.3, rotation: Math.random()*Math.PI*2, depth: Math.random()});
+    for(let i=0; i<180; i++) {
+        const dir = Math.random() > 0.5 ? 1 : -1; const h = 80 + Math.random() * 300;
+        vegetation.push({x: Math.random() * 60000, h, growth: 0, thickness: 8 + Math.random() * 25, isForeground: Math.random() > 0.75,
+            curvePoints: [{dx:0,dy:0}, {dx:25*dir*(0.7+Math.random()*0.6), dy:-h*0.2}, {dx:-25*dir*(0.4+Math.random()*0.6), dy:-h*0.55}, {dx:0,dy:-h}],
+            antennaH: 20 + Math.random() * 120
+        });
+    }
+    for(let i=0; i<18; i++) { birdsSwarm.push({ x: width + Math.random() * 1000, y: Math.random() * height * 0.4, speed: 3 + Math.random() * 4, size: 4 + Math.random() * 3, offset: Math.random() * Math.PI * 2, active: false, zone: "none", dir: -1 }); }
+    for (let i=0; i<24; i++) whiteBirds.push({ x: Math.random() * 60000, y: height * (0.08 + Math.random() * 0.34), speed: 1.2 + Math.random() * 1.7, size: 3 + Math.random() * 2.2, flap: Math.random() * Math.PI * 2 });
+    for (let i=0; i<85; i++) { const sx = 12000 + Math.random() * 43000; snowPiles.push({ x: sx, w: 24 + Math.random() * 110, h: 6 + Math.random() * 22 }); }
+    for (let i=0; i<820; i++) { const fx = 10000 + Math.random() * 49000; redFlowers.push({ x: fx, h: 7 + Math.random() * 34, r: 1.3 + Math.random() * 2.3, tilt: (Math.random() - 0.5) * 0.6 }); }
+    for (let i=0; i<18; i++) watercolorBlobs.push({
+        x: Math.random() * width,
+        y: Math.random() * height * 0.7,
+        rx: width * (0.08 + Math.random() * 0.2),
+        ry: height * (0.06 + Math.random() * 0.16),
+        a: 0.025 + Math.random() * 0.04,
+        vx: (Math.random() - 0.5) * 0.08,
+        vy: (Math.random() - 0.5) * 0.04,
+        phase: Math.random() * Math.PI * 2
+    });
+    for (let i=0; i<86; i++) mountainTreesFar.push({ x: 11000 + Math.random() * 47000, h: 22 + Math.random() * 75, w: 1 + Math.random() * 2.4, lean: (Math.random() - 0.5) * 0.5, tone: 0.25 + Math.random() * 0.25 });
+    for (let i=0; i<72; i++) mountainTreesNear.push({ x: 13000 + Math.random() * 45000, h: 36 + Math.random() * 95, w: 1.4 + Math.random() * 3.3, lean: (Math.random() - 0.5) * 0.45, tone: 0.45 + Math.random() * 0.35 });
+    for (let i=0; i<14; i++) {
+        const x = 11800 + Math.random() * 44500;
+        const h = 220 + Math.random() * 420;
+        const w = h * (0.48 + Math.random() * 0.42);
+        farRectTriPeaks.push({
+            x,
+            yLift: 120 + Math.random() * 220,
+            h,
+            w,
+            alpha: 0.06 + Math.random() * 0.09,
+            skew: (Math.random() - 0.5) * 0.38
+        });
+    }
+    // 第二关已移除碎石龙骨，保留远景矩形三角山峰
+    for (let i=0; i<70; i++) {
+        const x = 12000 + Math.random() * 43000;
+        const poly = [];
+        const n = 5 + Math.floor(Math.random() * 4);
+        const baseR = 10 + Math.random() * 110;
+        for (let k=0; k<n; k++) {
+            const a = (Math.PI * 2 * k) / n + Math.random() * 0.35;
+            const r = baseR * (0.55 + Math.random() * 0.65);
+            poly.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        }
+        floatingShards.push({
+            x,
+            yOffset: 20 + Math.random() * 140,
+            poly,
+            frontLayer: Math.random() < 0.28,
+            colorGroup: 'base',
+            rot: Math.random() * Math.PI * 2,
+            rotSpd: (Math.random() - 0.5) * 0.018,
+            bob: Math.random() * Math.PI * 2,
+            bobAmp: 4 + Math.random() * 18,
+            windOffset: 0,
+            revealDelayMs: Math.random() * 900,
+            revealDurationMs: SCENE2_SHARDS_REVEAL_MIN_MS + Math.random() * (SCENE2_SHARDS_REVEAL_MAX_MS - SCENE2_SHARDS_REVEAL_MIN_MS),
+            revealProgress: 0,
+            revealStartAt: 0,
+            entryDropPx: height * (0.22 + Math.random() * 0.2)
+        });
+    }
+    // 额外前景碎石：数量更多，确保在人物层前，并使用区别于主碎石的配色组
+    for (let i=0; i<36; i++) {
+        const x = 14000 + Math.random() * 40000;
+        const poly = [];
+        const n = 5 + Math.floor(Math.random() * 4);
+        const baseR = 8 + Math.random() * 58;
+        for (let k=0; k<n; k++) {
+            const a = (Math.PI * 2 * k) / n + Math.random() * 0.32;
+            const r = baseR * (0.58 + Math.random() * 0.6);
+            poly.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        }
+        floatingShards.push({
+            x,
+            yOffset: 12 + Math.random() * 100,
+            poly,
+            frontLayer: true,
+            colorGroup: 'frontAccent',
+            rot: Math.random() * Math.PI * 2,
+            rotSpd: (Math.random() - 0.5) * 0.026,
+            bob: Math.random() * Math.PI * 2,
+            bobAmp: 8 + Math.random() * 20,
+            windOffset: 0,
+            revealDelayMs: 240 + Math.random() * 1100,
+            revealDurationMs: SCENE2_SHARDS_REVEAL_MIN_MS + Math.random() * (SCENE2_SHARDS_REVEAL_MAX_MS - SCENE2_SHARDS_REVEAL_MIN_MS),
+            revealProgress: 0,
+            revealStartAt: 0,
+            entryDropPx: height * (0.24 + Math.random() * 0.22)
+        });
+    }
+}
+
+function initGame() {
+    document.getElementById('start-screen').style.display = 'none';
+    gameState = 'PLAYING';
+    resize(); initDecorations(); restartPlayer();
+    requestAnimationFrame(update);
+}
+
+function restartPlayer() {
+    player.x = 100; player.vx = 0; player.vy = 0;
+    player.y = height - groundH - player.height;
+    player.inputLocked = false;
+    player.collectedCount = 0; player.followingParticles = [];
+    camera.x = player.x - width * 0.15; camera.zoom = 1;
+}
+
+function restartGame() {
+    poemData.alpha = 0;
+    poemData.show = false;
+    poemData.state = 'idle';
+    poemData.lines = [];
+    poemData.timer = 0;
+    ringParticles = [];
+    expansionRings = [];
+    transition.scene2Blend = 0;
+    transition.shake = 0;
+    voidFall.phase = 'idle';
+    voidFall.wasOnTop = false;
+    voidFall.startTime = 0;
+    voidFall.prevPlayerX = 0;
+    voidFall.eyeFollowDist = 0;
+    voidFall.eyeCloseStart = 0;
+    voidFall.startPlayerY = 0;
+    voidFall.prevPlayerY = 0;
+    voidFall.camStartX = 0;
+    voidFall.camStartY = 0;
+    voidFall.camVelY = 0;
+    voidFall.fallState = 'idle';
+    voidFall.risePad = 0;
+    voidFall.hardLandAt = 0;
+    voidFall.recoverAt = 0;
+    initWindTransitionMarker();
+    landingFx.dust = [];
+    camera.shakeLand = 0;
+    giantBird.active = false;
+    document.getElementById('pause-screen').style.display = 'none';
+    gameState = 'PLAYING';
+    initDecorations();
+    restartPlayer();
+    requestAnimationFrame(update);
+}
+
+function lerpColor(c1, c2, t) {
+    const a = c1.match(/\w\w/g).map(v => parseInt(v, 16));
+    const b = c2.match(/\w\w/g).map(v => parseInt(v, 16));
+    const m = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+    return `rgb(${m[0]},${m[1]},${m[2]})`;
+}
+
+function getScene2OutlineColor() {
+    if (transition.scene2Blend < 0.01) return "#111";
+    return "rgb(165,35,48)";
+}
+
+function alignCameraInstant() {
+    const rampCamBlendStart = SCENE2_RAMP_START_X - 360;
+    const rampCamBlendEnd = SCENE2_RAMP_START_X + 520;
+    const rampT = Math.max(0, Math.min(1, (player.x - rampCamBlendStart) / (rampCamBlendEnd - rampCamBlendStart)));
+    const rampEase = easeInOut01(rampT);
+    const camAnchor = 0.2 + (SCENE2_RAMP_CAMERA_ANCHOR - 0.2) * rampEase;
+    const targetCamX = player.x - width * camAnchor;
+    camera.x = targetCamX;
+
+    const inStairArea = player.x > terrainParams.stairX - 800;
+    const vertOffset = (inStairArea && player.y < height * 0.6) ? (height * 0.6 - player.y) : 0;
+
+    const pts2 = getTerrainPoints();
+    const pts4 = getTerrain4Points();
+    const inB1 = player.x > pts2.start - 100 && player.x < pts2.end + 600;
+    const inB3 = player.x > terrainParams.bX3 - 100 && player.x < terrainParams.bX3 + terrainParams.w3 + 400;
+    const inB4 = player.x > pts4.start - 100 && player.x < pts4.end + 600;
+    const zoom = (inB1 || inB3 || inB4) ? 0.42 : 1.0;
+    const camY = (zoom < 1.0) ? 0 : (-vertOffset);
+
+    camera.targetZoom = zoom;
+    camera.zoom = zoom;
+    camera.targetY = camY;
+    camera.y = camY;
+}
+
+function ensureFollowingParticle(orbX, orbY) {
+    const exists = player.followingParticles.some(p => Math.abs(p.x - orbX) < 5 && Math.abs(p.y - orbY) < 5);
+    if (!exists) player.followingParticles.push({ x: orbX, y: orbY, trail: [], seed: Math.random() * Math.PI * 2 });
+    player.collectedCount = Math.max(player.collectedCount, player.followingParticles.length);
+}
+
+function syncProgressForJump(targetX) {
+    voidFall.phase = 'idle';
+    voidFall.wasOnTop = false;
+    voidFall.startTime = 0;
+    voidFall.prevPlayerX = 0;
+    voidFall.eyeFollowDist = 0;
+    voidFall.eyeCloseStart = 0;
+    voidFall.startPlayerY = 0;
+    voidFall.prevPlayerY = 0;
+    voidFall.camStartX = 0;
+    voidFall.camStartY = 0;
+    voidFall.camVelY = 0;
+    voidFall.fallState = 'idle';
+    voidFall.risePad = 0;
+    voidFall.hardLandAt = 0;
+    voidFall.recoverAt = 0;
+    voidLineMeteors.list = [];
+    initWindTransitionMarker();
+    if (targetX >= windTransition.columnX) {
+        windTransition.phase = 'done';
+        windTransition.done = true;
+        windTransition.intensity = 0;
+    }
+    landingFx.dust = [];
+    camera.shakeLand = 0;
+    if (targetX < terrainParams.stairX - 400) transition.scene2Blend = 0;
+    const orb1Y = height - groundH - height * terrainParams.h2Ratio - 50;
+    const keepParticles = [];
+    if (targetX >= 6000) {
+        specialOrb.triggered = true;
+        specialOrb.finalized = true;
+        keepParticles.push({ x: 6200, y: orb1Y });
+    } else {
+        specialOrb.triggered = false;
+        specialOrb.finalized = false;
+    }
+    if (targetX >= debrisOrb.x - 120) {
+        debrisOrb.triggered = true;
+        debrisOrb.finalized = true;
+        keepParticles.push({ x: debrisOrb.x, y: debrisOrb.y });
+    } else {
+        debrisOrb.triggered = false;
+        debrisOrb.finalized = false;
+    }
+    if (targetX >= terrainParams.stairX - 80) {
+        specialOrb2.triggered = true;
+        specialOrb2.finalized = true;
+        keepParticles.push({ x: specialOrb2.x, y: specialOrb2.y });
+    } else {
+        specialOrb2.triggered = false;
+        specialOrb2.finalized = false;
+    }
+    const orbPos = getPlatformTopOrbWorldPos();
+    if (scene2Ramp.flatUnlocked && targetX >= orbPos.x - 120) {
+        platformTopOrb.triggered = true;
+        platformTopOrb.finalized = true;
+        keepParticles.push({ x: orbPos.x, y: orbPos.y });
+    } else {
+        platformTopOrb.triggered = false;
+        platformTopOrb.finalized = false;
+    }
+    player.followingParticles = [];
+    keepParticles.forEach(p => ensureFollowingParticle(p.x, p.y));
+}
+
+function jumpTo(targetX, preferStair = false) {
+    if (gameState === 'MENU') return;
+
+    let landingY = getGroundHeight(targetX, Number.POSITIVE_INFINITY) - player.height;
+    if (preferStair && skyStairs.length > 0) {
+        let nearest = null;
+        let bestDist = Number.POSITIVE_INFINITY;
+        for (const stair of skyStairs) {
+            const dist = Math.abs(stair.x - targetX);
+            if (dist < bestDist) {
+                bestDist = dist;
+                nearest = stair;
+            }
+        }
+        if (nearest && bestDist < 280) landingY = nearest.y - player.height;
+    }
+
+    player.x = targetX;
+    player.y = landingY;
+    player.vx = 0;
+    player.vy = 0;
+    player.grounded = true;
+    player.inputLocked = false;
+    player.state = 'idle';
+    player.frameTimer = 0;
+
+    poemData.show = false;
+    poemData.alpha = 0;
+    poemData.state = 'idle';
+
+    syncProgressForJump(targetX);
+    alignCameraInstant();
+
+    document.getElementById('pause-screen').style.display = 'none';
+    gameState = 'PLAYING';
+    requestAnimationFrame(update);
+}
+
+function jumpToScene2() {
+    // 取消通天梯掉落过渡后，提供直接进入第二关的暂停节点
+    jumpTo(30500, false);
+    transition.scene2Blend = 1;
+    windTransition.phase = 'done';
+    windTransition.done = true;
+    windTransition.intensity = 0;
+    destroyWindVideoOverlay();
+}
+
+function jumpToRampTopRomanColumn() {
+    // 跳到三角斜坡顶部平台罗马柱区域
+    const targetX = 39147;
+    scene2Ramp.started = true;
+    scene2Ramp.flatUnlocked = true;
+    scene2Ramp.flatStartX = targetX - 170;
+    scene2Ramp.flatY = scene2RampEdgeY(scene2Ramp.flatStartX);
+    scene2Ramp.unlockedAt = performance.now() - SCENE2_PLATFORM_REVEAL_MS;
+    jumpTo(targetX, false);
+    transition.scene2Blend = 1;
+    windTransition.phase = 'done';
+    windTransition.done = true;
+    windTransition.intensity = 0;
+    destroyWindVideoOverlay();
+}
+
+function togglePause() {
+    if (gameState === 'MENU') return;
+    if (gameState === 'PLAYING') { gameState = 'PAUSED'; document.getElementById('pause-screen').style.display = 'flex'; } 
+    else { gameState = 'PLAYING'; document.getElementById('pause-screen').style.display = 'none'; requestAnimationFrame(update); }
+}
+
+function resize() {
+    const targetRatio = 16 / 9;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let nextW = vw;
+    let nextH = Math.floor(vw / targetRatio);
+    if (nextH > vh) {
+        nextH = vh;
+        nextW = Math.floor(vh * targetRatio);
+    }
+
+    width = canvas.width = nextW;
+    height = canvas.height = nextH;
+    canvas.style.width = `${nextW}px`;
+    canvas.style.height = `${nextH}px`;
+    syncWindOverlayRect();
+    syncWindVideoRect();
+
+    groundH = height * 0.08; playerH = height * 0.11; 
+    player.height = playerH; player.width = playerH * 0.85;
+}
+window.addEventListener('resize', resize);
+
+const keys = {};
+let jumpPressedLast = false;
+window.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Escape') togglePause(); });
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+function tryStartVoidFall(topStair) {
+    // 按需求移除“通天梯 -> 下坠 -> 第二关地面”的过渡触发
+    return;
+}
+
+function update() {
+    if (gameState !== 'PLAYING') return;
+
+    if (!skyCurtain.active && player.x >= SCENE2_ARCH_BRIDGE_START_X - 80) {
+        skyCurtain.active = true;
+        skyCurtain.startX = player.x;
+        skyCurtain.startedAt = performance.now();
+    }
+
+    if (player.x >= SCENE2_RAMP_START_X) {
+        const rampNow = performance.now();
+        if (!scene2Ramp.started) {
+            scene2Ramp.started = true;
+            scene2Ramp.startAt = rampNow;
+            scene2Ramp.lastTick = rampNow;
+            scene2Ramp.lastX = player.x;
+        } else if (!scene2Ramp.flatUnlocked) {
+            // 只统计“持续向前爬坡”的时间：中途停下不计时
+            const dtMs = Math.max(0, rampNow - (scene2Ramp.lastTick || rampNow));
+            const dx = player.x - (scene2Ramp.lastX || player.x);
+            const climbingForward = dx > 0.04 && player.vx > 0.08;
+            if (climbingForward) scene2Ramp.climbAccumMs += dtMs;
+            scene2Ramp.lastTick = rampNow;
+            scene2Ramp.lastX = player.x;
+
+            if (scene2Ramp.climbAccumMs >= SCENE2_RAMP_RUN_MS) {
+                scene2Ramp.flatUnlocked = true;
+                scene2Ramp.unlockedAt = rampNow;
+                scene2Ramp.flatStartX = player.x; // 20秒到达的当前位置就是平地起点
+                // 计算 45 度角的当前 Y 高度
+                scene2Ramp.flatY = scene2RampEdgeY(player.x);
+            }
+        }
+    }
+
+    tryStartWindTransition();
+    updateWindTransition();
+
+    updateLandingFxDust();
+
+    const topStair = skyStairs.find(s => s.isTop);
+    const inVoidFall = voidFall.phase === 'falling';
+    if (topStair && !windTransition.touchedStairTop) {
+        const nearTop = Math.abs(player.x - topStair.x) < topStair.w * 0.55;
+        const footY = player.y + player.height;
+        if (nearTop && Math.abs(footY - topStair.y) < 46) windTransition.touchedStairTop = true;
+    }
+    if (!windTransition.armedAfterDrop) {
+        const footY = player.y + player.height;
+        const droppedFromTop = topStair && windTransition.touchedStairTop && player.grounded && footY > topStair.y + 140;
+        const fallbackProgress = player.x > terrainParams.stairX + 920 && player.grounded;
+        if (droppedFromTop || fallbackProgress) windTransition.armedAfterDrop = true;
+    }
+
+    let moving = false;
+    const jumpDown = !!(keys['Space'] || keys['ArrowUp'] || keys['KeyW']);
+    const jumpPressed = jumpDown && !jumpPressedLast;
+    jumpPressedLast = jumpDown;
+    if (!player.inputLocked && !inVoidFall) {
+        if (keys['ArrowRight'] || keys['KeyD']) { player.vx += player.accel; player.facing = 1; moving = true; }
+        if (keys['ArrowLeft'] || keys['KeyA']) { player.vx -= player.accel; player.facing = -1; moving = true; }
+        if (jumpPressed && player.jumpCount < player.maxJumps) {
+            player.vy = player.jumpForce;
+            player.grounded = false;
+            player.jumpCount++;
+        }
+    }
+
+    if (inVoidFall) {
+        const elapsed = performance.now() - voidFall.startTime;
+        const dt = 1 / 60;
+        const footY = player.y + player.height;
+        const realG = shapeCastGroundAtFeet(player.x, player.y, footY, player.width * 0.32);
+        const rise = voidFall.risePad * Math.max(0, 1 - elapsed / VOID_FALL_MS);
+        const effectiveG = realG + rise;
+
+        camera.targetZoom = 1;
+        camera.zoom = 1;
+        camera.targetY = camera.y;
+
+        if (voidFall.fallState === 'freeFall') {
+            player.vx *= 0.93;
+            player.x += player.vx;
+            player.vy = Math.min(player.vy + VOID_GRAVITY, VOID_TERM_VELOCITY);
+            player.y += player.vy;
+            player.grounded = false;
+
+            if (footY >= effectiveG - 1.5 && player.vy >= -0.5) {
+                player.y = effectiveG - player.height;
+                player.vy = 0;
+                voidFall.fallState = 'hardLanding';
+                voidFall.hardLandAt = performance.now();
+                triggerVoidLandingEvent(player.x + player.width * 0.5, effectiveG);
+            }
+            if (elapsed >= VOID_FALL_MS - 40 && voidFall.fallState === 'freeFall') {
+                player.y = realG - player.height;
+                player.vy = 0;
+                voidFall.fallState = 'hardLanding';
+                voidFall.hardLandAt = performance.now();
+                triggerVoidLandingEvent(player.x + player.width * 0.5, realG);
+            }
+
+            if (elapsed >= VOID_BG1_START_MS) transition.scene2Blend = 1;
+            updateVoidLineMeteors(player.vy);
+            updateVoidCapeChain();
+
+            const camT = Math.min(1, elapsed / 620);
+            const camEase = camT * camT * (3 - 2 * camT);
+            const targetCamX = voidFall.camStartX + (player.x + player.width * 0.5 - width * 0.5 - voidFall.camStartX) * camEase;
+            const targetCamYBase = voidFall.camStartY + (player.y + player.height * 0.5 - height * 0.5 - voidFall.camStartY) * camEase;
+            const lookaheadY = Math.min(72, Math.max(0, player.vy * VOID_CAM_LOOKAHEAD_Y));
+            const targetCamY = targetCamYBase + lookaheadY;
+            const dampY = smoothDampScalarY(camera.y, targetCamY, voidFall.camVelY, VOID_CAM_SMOOTH_TIME, dt);
+            camera.y = dampY.pos;
+            voidFall.camVelY = dampY.vel;
+            camera.x = targetCamX;
+        } else if (voidFall.fallState === 'hardLanding') {
+            player.vx *= 0.9;
+            player.grounded = true;
+            updateVoidLineMeteors(5);
+            updateVoidCapeChain();
+            const targetCamX = player.x + player.width * 0.5 - width * 0.5;
+            const targetCamY = player.y + player.height * 0.5 - height * 0.5;
+            const dampY = smoothDampScalarY(camera.y, targetCamY, voidFall.camVelY, VOID_CAM_LAND_SMOOTH_TIME, dt);
+            camera.y = dampY.pos;
+            voidFall.camVelY = dampY.vel;
+            camera.x = targetCamX;
+            if (performance.now() - voidFall.hardLandAt >= HARD_LANDING_MS) {
+                voidFall.fallState = 'recoverStand';
+                voidFall.recoverAt = performance.now();
+            }
+        } else if (voidFall.fallState === 'recoverStand') {
+            player.vx *= 0.92;
+            player.grounded = true;
+            updateVoidLineMeteors(4);
+            updateVoidCapeChain();
+            const targetCamX = player.x + player.width * 0.5 - width * 0.5;
+            const targetCamY = player.y + player.height * 0.5 - height * 0.5;
+            const dampY = smoothDampScalarY(camera.y, targetCamY, voidFall.camVelY, VOID_CAM_LAND_SMOOTH_TIME, dt);
+            camera.y = dampY.pos;
+            voidFall.camVelY = dampY.vel;
+            camera.x = targetCamX;
+            if (performance.now() - voidFall.recoverAt >= RECOVER_STAND_MS) {
+                voidFall.phase = 'eyeFollow';
+                voidFall.fallState = 'idle';
+                transition.scene2Blend = 1;
+                player.y = shapeCastGroundAtFeet(player.x, player.y, player.y + player.height, player.width * 0.32) - player.height;
+                player.vy = 0;
+                player.vx *= 0.42;
+                player.grounded = true;
+                player.inputLocked = false;
+                voidFall.prevPlayerX = player.x;
+                voidFall.eyeFollowDist = 0;
+                voidFall.camVelY = 0;
+            }
+        }
+    } else {
+        player.vx *= friction; player.vy += gravity; player.x += player.vx; player.y += player.vy;
+        tryStartVoidFall(topStair);
+        if (voidFall.phase !== 'falling') {
+            const currentGround = getGroundHeight(player.x, player.y);
+            if (player.y + player.height > currentGround) {
+                player.y = currentGround - player.height;
+                player.vy = 0; player.grounded = true;
+            } else {
+                player.grounded = false;
+            }
+        }
+    }
+
+    if (player.grounded) player.jumpCount = 0;
+    if (windTransition.phase !== 'idle' && !windTransition.done && !inVoidFall) {
+        player.vx *= 0.72;
+        player.facing = 1;
+    }
+
+    const windN = Math.max(0, Math.min(1, windTransition.intensity / 100));
+    const windActive = windTransition.phase !== 'idle' && !windTransition.done;
+    const gust = windActive ? 0.72 + 0.28 * Math.sin(performance.now() * 0.0018 + camera.x * 0.00015) : 1;
+    const windDir = -1;
+
+    // ✨ 收集粒子跟随逻辑（虚空下坠时由流星逻辑单独更新）
+    const isPlayerStopped = !inVoidFall && Math.abs(player.vx) < 0.12 && player.grounded && !moving;
+    const hasFourBodies = player.followingParticles.length >= 4;
+    const waistAnchorY = player.y + player.height * 0.58;
+    if (!inVoidFall) player.followingParticles.forEach((p, i) => {
+        if (typeof p.seed !== "number") p.seed = Math.random() * Math.PI * 2;
+        const t = Date.now() * 0.0042 + p.seed;
+        const inStairJumpLift = !player.grounded && player.x > terrainParams.stairX - 900 && player.x < terrainParams.stairX + 1700;
+        let targetX = player.x - 34 * player.facing;
+        let targetY = waistAnchorY;
+        let lerpX = 0.14;
+        let lerpY = 0.14;
+
+        if (hasFourBodies || isPlayerStopped) {
+            // 静止时切到“三体”式互扰环绕：不同角速度+耦合项，形成非规则轨道。
+            const nodeCount = Math.max(3, player.followingParticles.length);
+            const phase = (Math.PI * 2 * i) / nodeCount;
+            const baseR = hasFourBodies ? 28 : 22;
+            const radius = baseR + (hasFourBodies ? 10 : 4) * Math.sin(t * 0.45 + phase * 1.6);
+            const omega = (hasFourBodies ? 1.05 : 0.6) + i * (hasFourBodies ? 0.24 : 0.17);
+            const coupledX = (hasFourBodies ? 14 : 9) * Math.sin(t * (0.53 + i * 0.08) + phase * 2.2);
+            const coupledY = (hasFourBodies ? 12 : 8) * Math.cos(t * (0.61 + i * 0.05) - phase * 1.4);
+            const spiralX = Math.cos(t * (hasFourBodies ? 2.4 : 1.9) + phase * 1.3) * ((hasFourBodies ? 7 : 4) + i * 1.5);
+            const spiralY = Math.sin(t * (hasFourBodies ? 2.8 : 2.2) - phase) * ((hasFourBodies ? 6 : 3) + i * 1.1);
+            targetX = player.x + player.width * 0.5;
+            targetY = waistAnchorY;
+            targetX += Math.cos(t * omega + phase) * radius + coupledX;
+            targetY += Math.sin(t * (omega * 1.18) + phase * 0.7) * (8 + i * 2) + coupledY + spiralY;
+            targetX += spiralX;
+            lerpX = hasFourBodies ? 0.13 : 0.1;
+            lerpY = hasFourBodies ? 0.13 : 0.1;
+        } else {
+            const nearRadius = inStairJumpLift ? (18 + i * 4) : (24 + i * 6);
+            const orbitX = Math.cos(t * (0.8 + i * 0.08)) * nearRadius;
+            const orbitY = Math.sin(t * (1.1 + i * 0.06)) * (inStairJumpLift ? 22 : 15);
+            const randomJitterX = Math.sin(t * 1.7 + i) * 7;
+            const randomJitterY = Math.cos(t * 1.3 - i * 0.6) * 5;
+            targetX += orbitX + randomJitterX;
+            targetY += orbitY + randomJitterY;
+            if (inStairJumpLift) targetY -= 34 + i * 8;
+            lerpX = inStairJumpLift ? 0.2 : 0.14;
+            lerpY = inStairJumpLift ? 0.22 : 0.14;
+        }
+
+        p.x += (targetX - p.x) * lerpX;
+        p.y += (targetY - p.y) * lerpY;
+        if (windN > 0.01) {
+            const gustPush = (22 + i * 2.2) * windN * gust;
+            p.x += gustPush * windDir;
+            p.y += Math.sin(Date.now() * 0.0065 + i * 0.9 + camera.x * 0.0002) * (1.35 + 0.9 * windN) * gust;
+        }
+        // 拖尾更新
+        p.trail.unshift({x: p.x, y: p.y});
+        if(p.trail.length > 24) p.trail.pop();
+    });
+
+    player.frameTimer = (player.frameTimer || 0) + 0.18;
+    if (!player.grounded) player.state = 'jump';
+    else if (moving || Math.abs(player.vx) > 0.5) player.state = 'run';
+    else player.state = 'idle';
+    if (inVoidFall && voidFall.fallState === 'freeFall') player.state = 'idle';
+    const anim = images[player.state];
+    if (anim && anim.length > 0) player.frame = Math.floor(player.frameTimer) % anim.length;
+
+    if (!inVoidFall) {
+        const rampCamBlendStart = SCENE2_RAMP_START_X - 360;
+        const rampCamBlendEnd = SCENE2_RAMP_START_X + 520;
+        const rampT = Math.max(0, Math.min(1, (player.x - rampCamBlendStart) / (rampCamBlendEnd - rampCamBlendStart)));
+        const rampEase = easeInOut01(rampT);
+        const camAnchor = 0.2 + (SCENE2_RAMP_CAMERA_ANCHOR - 0.2) * rampEase;
+        const targetCamX = player.x - width * camAnchor;
+        const inStairArea = player.x > terrainParams.stairX - 800;
+        const inRampClimb = transition.scene2Blend > 0.01 && player.x >= SCENE2_RAMP_START_X - 80;
+        const stairOffset = (inStairArea && player.y < height * 0.6) ? (height * 0.6 - player.y) : 0;
+        const rampOffset = (inRampClimb && player.y < height * 0.62) ? (height * 0.62 - player.y) : 0;
+        const vertOffset = Math.max(stairOffset, rampOffset);
+        const pts2 = getTerrainPoints(); const pts4 = getTerrain4Points();
+        const inB1 = player.x > pts2.start - 100 && player.x < pts2.end + 600;
+        const inB3 = player.x > terrainParams.bX3 - 100 && player.x < terrainParams.bX3 + terrainParams.w3 + 400;
+        const inB4 = player.x > pts4.start - 100 && player.x < pts4.end + 600;
+        camera.targetZoom = (inB1 || inB3 || inB4) ? 0.42 : 1.0;
+        camera.targetY = (camera.targetZoom < 1.0) ? 0 : (-vertOffset);
+        const isZoomedOut = camera.targetZoom < 1.0;
+        const camXDeadzone = isZoomedOut ? 22 : 0;
+        const dx = targetCamX - camera.x;
+        if (Math.abs(dx) > camXDeadzone) {
+            camera.x += (dx - Math.sign(dx) * camXDeadzone) * (isZoomedOut ? 0.038 : 0.08);
+        }
+        camera.zoom += (camera.targetZoom - camera.zoom) * (isZoomedOut ? 0.008 : 0.012);
+        camera.y += (camera.targetY - camera.y) * (isZoomedOut ? 0.028 : 0.05);
+    }
+
+    // 诗篇逻辑
+    if (!specialOrb.triggered && Math.abs(player.x - 6200) < 80 && player.grounded) {
+        specialOrb.triggered = true; poemData.show = true; poemData.state = 'fadein'; poemData.isFirst = true;
+        poemData.lines = ["立于高地，", "视线穿越尘世与心灵。", "曾被遮蔽的方向，", "在静默中显现。"];
+        player.inputLocked = true; player.vx = 0;
+        for (let i = 0; i < 3000; i++) { const a = (i/3000)*Math.PI*2, s=15+Math.random()*20; ringParticles.push({x:6200, y:height-groundH-height*0.55-50, vx:Math.cos(a)*s, vy:Math.sin(a)*s, alpha:1, size:1.2}); }
+        giantBird.active = true; giantBird.x = width + 600; giantBird.y = height * 0.22;
+    }
+    if (!specialOrb2.triggered && Math.abs(player.x - specialOrb2.x) < 50 && Math.abs(player.y - (specialOrb2.y - player.height)) < 40) {
+        specialOrb2.triggered = true; poemData.show = true; poemData.state = 'fadein'; poemData.isFirst = false;
+        poemData.lines = ["阴影在穹顶溺亡时", "会折叠成新的对称", "石料们以克重", "计算千年后", "崩塌的环境"];
+        player.inputLocked = true; player.vx = 0;
+        for(let i=0; i<4; i++) expansionRings.push({ r: 0, dr: 10 + i*8, alpha: 1 });
+    }
+    if (!debrisOrb.triggered) {
+        debrisOrb.pulse += 0.06;
+        const dxDebris = player.x - debrisOrb.x;
+        const dyDebris = (player.y + player.height * 0.5) - debrisOrb.y;
+        if (Math.abs(dxDebris) < 65 && Math.abs(dyDebris) < 60 && !player.grounded) {
+            debrisOrb.triggered = true;
+            debrisOrb.finalized = true;
+            for (let i = 0; i < 6; i++) {
+                holyRings.push({
+                    r: 20 + i * 24,
+                    dr: 7 + i * 1.8,
+                    alpha: 0.9 - i * 0.1,
+                    lineW: 4 - i * 0.4
+                });
+            }
+            if (player.followingParticles.length < 2) {
+                player.followingParticles = [];
+                ensureFollowingParticle(debrisOrb.x, debrisOrb.y);
+                ensureFollowingParticle(6200, height-groundH-height*0.55-50);
+            }
+        }
+    }
+    const platformOrbPos = getPlatformTopOrbWorldPos();
+    platformTopOrb.x = platformOrbPos.x;
+    platformTopOrb.y = platformOrbPos.y;
+    if (!platformTopOrb.triggered && scene2Ramp.flatUnlocked) {
+        platformTopOrb.pulse += 0.06;
+        const dxSummit = player.x - platformTopOrb.x;
+        const dySummit = (player.y + player.height * 0.5) - platformTopOrb.y;
+        if (Math.abs(dxSummit) < 70 && Math.abs(dySummit) < 70) {
+            platformTopOrb.triggered = true;
+            platformTopOrb.finalized = true;
+            for (let i = 0; i < 5; i++) {
+                expansionRings.push({
+                    x: platformTopOrb.x,
+                    y: platformTopOrb.y,
+                    r: 20 + i * 22,
+                    // 中心圈更慢，外圈更快，形成参考图那种层次扩散
+                    dr: 0.7 + i * 0.62,
+                    alpha: 0.74 - i * 0.09,
+                    lineW: 2.4 - i * 0.24,
+                    glowMul: 1 + i * 0.12
+                });
+            }
+            ensureFollowingParticle(platformTopOrb.x, platformTopOrb.y);
+            while (player.followingParticles.length < 4) {
+                player.followingParticles.push({
+                    x: player.x + player.width * 0.5 + (Math.random() - 0.5) * 18,
+                    y: player.y + player.height * 0.55 + (Math.random() - 0.5) * 16,
+                    trail: [],
+                    seed: Math.random() * Math.PI * 2
+                });
+            }
+            player.collectedCount = Math.max(player.collectedCount, 4);
+        }
+    }
+
+    if (poemData.show) {
+        if (poemData.state === 'fadein') { poemData.alpha += 0.005; if(poemData.alpha >= 1) poemData.state = 'stay'; poemData.timer = 300; }
+        else if (poemData.state === 'stay') { poemData.timer--; if(poemData.timer <= 0) poemData.state = 'fadeout'; }
+        else if (poemData.state === 'fadeout') { 
+            poemData.alpha -= 0.01; 
+            if(poemData.alpha <= 0) { 
+                poemData.alpha = 0; poemData.state = 'end'; player.inputLocked = false; 
+                // ✨ 文字消失后，粒子来到身后
+                if(poemData.isFirst && !specialOrb.finalized) {
+                    player.followingParticles.push({x: 6200, y: height-groundH-height*0.55-50, trail: [], seed: Math.random() * Math.PI * 2});
+                    specialOrb.finalized = true;
+                } else if(!poemData.isFirst && !specialOrb2.finalized) {
+                    if (player.followingParticles.length < 2 && debrisOrb.finalized) {
+                        ensureFollowingParticle(debrisOrb.x, debrisOrb.y);
+                        ensureFollowingParticle(6200, height-groundH-height*0.55-50);
+                    }
+                    player.followingParticles.push({x: specialOrb2.x, y: specialOrb2.y, trail: [], seed: Math.random() * Math.PI * 2});
+                    specialOrb2.finalized = true;
+                }
+            } 
+        }
+    }
+
+    if (giantBird.active) { giantBird.x -= 2.8; giantBird.flap += 0.04; giantBird.alpha = Math.min(0.65, giantBird.alpha + 0.005); if (giantBird.x < -1500) giantBird.active = false; }
+    ringParticles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.vx *= 0.985; p.vy *= 0.985; p.alpha -= 0.008; if (p.alpha <= 0) ringParticles.splice(i, 1); });
+    expansionRings.forEach((r, i) => { r.r += r.dr; r.alpha -= 0.006; if(r.alpha <= 0) expansionRings.splice(i, 1); });
+    holyRings.forEach((r, i) => { r.r += r.dr; r.alpha -= 0.012; if (r.alpha <= 0) holyRings.splice(i, 1); });
+    ambientStorm.forEach(p => {
+        p.x += p.vx + (10 + 16 * windN) * gust * windDir;
+        p.y += p.vy - 0.35 * windN * gust;
+        if (p.x < 0) p.x = width;
+        if (p.x > width) p.x = 0;
+        if (p.y > height) p.y = 0;
+        if (p.y < 0) p.y = height;
+    });
+    const birdZones = [
+        { name: "triangle", start: getTerrainPoints().start - 280, end: getTerrainPoints().end + 260 },
+        { name: "building", start: terrainParams.bX5 - 450, end: terrainParams.bX5 + 1200 },
+        { name: "stairs", start: terrainParams.stairX - 720, end: terrainParams.stairX + 1600 }
+    ];
+    const activeZone = birdZones.find(z => player.x >= z.start && player.x <= z.end);
+    birdsSwarm.forEach((b, i) => {
+        if (windN > 0.12 && !b.active && i % 3 === 0 && Math.random() < 0.09 + windN * 0.08) {
+            b.active = true;
+            b.dir = -1;
+            b.x = camera.x + width + 80 + Math.random() * 180;
+            b.y = height * (0.08 + Math.random() * 0.3);
+            b.speed = 3 + Math.random() * 3;
+        }
+        if (activeZone && !b.active && i % 5 === 0 && Math.random() < 0.06) {
+            b.active = true;
+            b.zone = activeZone.name;
+            b.dir = -1;
+            b.x = camera.x + width + 120;
+            b.y = height * (0.12 + Math.random() * 0.25);
+            b.speed = 4 + Math.random() * 3;
+        }
+        if (!b.active) return;
+        b.x += b.speed * b.dir + (14 + 26 * windN) * gust * windDir;
+        b.offset += 0.22 + 0.32 * windN;
+        b.y += Math.sin(b.offset * 0.82 + i * 0.7 + gust * 0.4) * (0.85 + 3.4 * windN) * gust;
+        if (b.x < camera.x - 240 || b.x > camera.x + width + 240) b.active = false;
+    });
+    whiteBirds.forEach(wb => {
+        wb.x += (-wb.speed + (8 + 22 * windN) * gust * windDir);
+        wb.flap += 0.13 + 0.24 * windN * gust;
+        wb.y += Math.sin(wb.flap * 0.88 + gust) * (0.18 + windN * 2.4) * gust;
+        if (wb.x < camera.x - 220) {
+            wb.x = camera.x + width + 220 + Math.random() * 320;
+            wb.y = height * (0.08 + Math.random() * 0.34);
+        }
+        if (wb.x > camera.x + width + 260) {
+            wb.x = camera.x - 220 - Math.random() * 180;
+            wb.y = height * (0.08 + Math.random() * 0.34);
+        }
+    });
+    watercolorBlobs.forEach(w => {
+        w.x += w.vx;
+        w.y += w.vy + Math.sin(Date.now() * 0.00025 + w.phase) * 0.01;
+        if (w.x < -w.rx) w.x = width + w.rx;
+        if (w.x > width + w.rx) w.x = -w.rx;
+        if (w.y < -w.ry) w.y = height * 0.75 + w.ry * 0.2;
+        if (w.y > height * 0.8 + w.ry) w.y = -w.ry * 0.3;
+    });
+    const shardsReadyToReveal = transition.scene2Blend >= SCENE2_SHARDS_SHOW_BLEND && windTransition.done;
+    const nowMs = performance.now();
+    floatingShards.forEach(s => {
+        s.bob += 0.01 + s.bobAmp * 0.00006 + windN * 0.028 * gust;
+        s.windOffset = (s.windOffset || 0) * (0.84 - windN * 0.26) + (16 + s.bobAmp * 0.95) * windN * gust * windDir;
+        if (shardsReadyToReveal) {
+            if (!s.revealStartAt) s.revealStartAt = nowMs + (s.revealDelayMs || 0);
+            const p = Math.max(0, Math.min(1, (nowMs - s.revealStartAt) / Math.max(120, s.revealDurationMs || 1000)));
+            s.revealProgress = Math.max(s.revealProgress || 0, p);
+        } else {
+            s.revealProgress = 0;
+            s.revealStartAt = 0;
+        }
+    });
+    vegetation.forEach(v => { if (Math.abs(player.x - v.x) < 850) v.growth = Math.min(1, v.growth + 0.04); });
+    skyStairs.forEach(s => { if(s.plant && Math.abs(player.x - s.x) < 300) s.plant.growth = Math.min(1, s.plant.growth + 0.05); });
+
+    if (voidFall.phase === 'eyeFollow') {
+        voidFall.eyeFollowDist += Math.abs(player.x - voidFall.prevPlayerX);
+        voidFall.prevPlayerX = player.x;
+        if (voidFall.eyeFollowDist >= VOID_EYE_FOLLOW_DIST) {
+            voidFall.phase = 'eyeClose';
+            voidFall.eyeCloseStart = performance.now();
+        }
+    } else if (voidFall.phase === 'eyeClose') {
+        if (performance.now() - voidFall.eyeCloseStart >= VOID_EYE_CLOSE_MS) voidFall.phase = 'done';
+    }
+
+    draw();
+    updateWindOverlayLifecycle();
+    requestAnimationFrame(update);
+}
+
+function drawWeapon(w) {
+    const rx = w.x - camera.x; if(rx < -300 || rx > width + 300) return;
+    const ry = getGroundHeight(w.x, 9999);
+    ctx.save();
+    ctx.translate(rx, ry);
+    ctx.rotate(w.rotation);
+    ctx.scale(w.scale * 3, w.scale * 3);
+    const t = transition.scene2Blend;
+    const weaponColor = t > 0 ? lerpColor("111111", "ffffff", t) : "#111";
+    ctx.fillStyle = weaponColor;
+
+    if (w.type === 'sword') {
+        // 剑身
+        ctx.fillRect(-2, -60, 4, 60);
+        // 护手
+        ctx.fillRect(-8, -15, 16, 3);
+        // 剑首
+        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+    } else {
+        // 戟杆
+        ctx.fillRect(-1.5, -90, 3, 90);
+        // 戟头
+        ctx.beginPath(); ctx.moveTo(0, -90); ctx.lineTo(-10, -75); ctx.lineTo(0, -65); ctx.lineTo(10, -75); ctx.closePath(); ctx.fill();
+        // 侧刃 (圆弧几何)
+        ctx.beginPath(); ctx.arc(-5, -78, 8, Math.PI*0.5, Math.PI*1.5); ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawSkyStair(stair) {
+    const rx = stair.x - camera.x; if(rx < -500 || rx > width + 500) return;
+    ctx.save(); ctx.translate(rx, stair.y);
+    const t = transition.scene2Blend;
+    const stairDark = t > 0 ? lerpColor("000000", "ffffff", t) : "#000";
+    const stairMid = t > 0 ? lerpColor("1a1a1a", "f2f2f2", t) : "#1a1a1a";
+    const stairLow = t > 0 ? lerpColor("0c0c0c", "e8e8e8", t) : "#0c0c0c";
+    ctx.fillStyle = stairDark; ctx.beginPath(); ctx.rect(-stair.w / 2, 0, stair.w, stair.h); ctx.fill();
+    ctx.fillStyle = stairMid; ctx.beginPath(); ctx.rect(-stair.w/2 + 8, 4, stair.w - 16, stair.h/2); ctx.fill();
+    ctx.fillStyle = stairLow; ctx.beginPath(); ctx.moveTo(stair.w/2, stair.h); ctx.lineTo(stair.w/2+15, stair.h+15); ctx.lineTo(-stair.w/2+15, stair.h+15); ctx.lineTo(-stair.w/2, stair.h); ctx.fill();
+    if (stair.plant && stair.plant.growth > 0) {
+        ctx.save(); ctx.scale(1, stair.plant.growth); ctx.fillStyle = stairDark;
+        const th = stair.plant.thickness, ph = stair.plant.h;
+        ctx.beginPath(); ctx.moveTo(-th/2, 0); ctx.bezierCurveTo(-th*2, -ph*0.3, th*2, -ph*0.6, 0, -ph); ctx.bezierCurveTo(th, -ph*0.6, -th, -ph*0.3, th/2, 0); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, -ph); ctx.lineTo(0, -ph - stair.plant.antennaH); ctx.lineWidth = 0.8; ctx.strokeStyle = stairDark; ctx.stroke();
+        ctx.restore();
+    }
+    ctx.restore();
+}
+
+function drawRomanColumn(col) {
+    if (col.x >= SCENE2_RAMP_START_X) return;
+    const rx = col.x - camera.x; if(rx < -500 || rx > width + 500) return;
+    ctx.save(); ctx.translate(rx, getGroundHeight(col.x, 9999));
+    ctx.fillStyle = transition.scene2Blend > 0.001 ? "#ffffff" : "#e5e5e5";
+    const outlineAlpha = transition.scene2Blend > 0.001 ? 0.08 : 0.85;
+    ctx.strokeStyle = `rgba(0,0,0,${outlineAlpha})`;
+    ctx.lineWidth = 0.8;
+    col.blocks.forEach(block => {
+        ctx.beginPath();
+        ctx.rect(-block.w / 2, block.y, block.w, block.h);
+        ctx.fill();
+        ctx.stroke();
+    });
+    ctx.restore();
+}
+
+function drawScene2SkyColumn() {
+    if (transition.scene2Blend < 0.01) return;
+    const x = SCENE2_SKY_COLUMN_X - camera.x;
+    if (x < -240 || x > width + 240) return;
+
+    const gY = getGroundHeight(SCENE2_SKY_COLUMN_X, 9999);
+    const h = height * SCENE2_SKY_COLUMN_HEIGHT_RATIO;
+    const bodyW = Math.max(28, width * 0.02);
+    const capH = Math.max(24, height * 0.035);
+    const baseH = Math.max(26, height * 0.04);
+
+    ctx.save();
+    ctx.translate(x, gY);
+    const drawBlock = (x0, y0, w0, h0, shade, stroke = "rgba(132,94,104,0.42)") => {
+        ctx.fillStyle = shade;
+        ctx.fillRect(x0, y0, w0, h0);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x0, y0, w0, h0);
+    };
+    const chipTopRight = (x0, y0, w0, h0, size) => {
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.beginPath();
+        ctx.moveTo(x0 + w0 - size, y0);
+        ctx.lineTo(x0 + w0, y0);
+        ctx.lineTo(x0 + w0, y0 + size);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    };
+    const chipBottomLeft = (x0, y0, w0, h0, size) => {
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.beginPath();
+        ctx.moveTo(x0, y0 + h0 - size);
+        ctx.lineTo(x0, y0 + h0);
+        ctx.lineTo(x0 + size, y0 + h0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    };
+
+    // 先画细长中轴，避免中段视觉断开
+    drawBlock(-bodyW * 0.22, -h - capH, bodyW * 0.44, h + capH, "rgba(246,239,241,0.98)", "rgba(146,110,118,0.28)");
+
+    // 由更小方块/矩形堆叠出更精细层数
+    const layers = 22;
+    let y = -h;
+    for (let i = 0; i < layers; i++) {
+        const hh = h * (0.026 + (i % 3) * 0.005);
+        const widthScale = 0.66 + (i % 6) * 0.06;
+        const ww = bodyW * widthScale;
+        const xx = -ww * 0.5 + ((i % 2 === 0) ? -bodyW * 0.03 : bodyW * 0.03);
+        const shade = (i % 2 === 0) ? "rgba(249,244,245,0.98)" : "rgba(242,234,237,0.97)";
+        drawBlock(xx, y, ww, hh, shade);
+
+        // 隔层叠加正方形块，提升“几何拼贴”密度
+        if (i % 3 === 1) {
+            const sq = Math.max(8, ww * 0.22);
+            drawBlock(-sq * 0.5, y + hh * 0.14, sq, sq, "rgba(252,248,248,0.98)");
+        }
+
+        // 轻量边缘破损（三角镂空），避免打穿中轴
+        const chip = Math.max(4, ww * 0.12);
+        if (i % 4 === 0) chipTopRight(xx, y, ww, hh, chip);
+        if (i % 5 === 2) chipBottomLeft(xx, y, ww, hh, chip * 0.88);
+        y += hh;
+    }
+
+    // 顶部与底座压盖
+    drawBlock(-bodyW * 0.95, -h - capH, bodyW * 1.9, capH, "rgba(250,246,246,0.99)");
+    drawBlock(-bodyW * 0.88, -baseH, bodyW * 1.76, baseH, "rgba(247,240,241,0.99)");
+
+    // 顶部锯齿三角：颜色取背景色，形成镂空错觉
+    const bgColor = transition.scene2Blend > 0.01 ? "rgb(242,171,178)" : "rgb(238,234,230)";
+    ctx.fillStyle = bgColor;
+    const triY = -h - capH;
+    const triW = bodyW * 0.22;
+    const triH = capH * 0.42;
+    for (let i = -3; i <= 3; i++) {
+        const cx = i * triW * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(cx - triW * 0.5, triY);
+        ctx.lineTo(cx, triY + triH);
+        ctx.lineTo(cx + triW * 0.5, triY);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // 中轴分缝线
+    ctx.strokeStyle = "rgba(138,104,112,0.24)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -h - capH + 2);
+    ctx.lineTo(0, -2);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawRuinColumnStack(worldX, heightRatio, widthRatio) {
+    const x = worldX - camera.x;
+    if (x < -240 || x > width + 240) return;
+    // 实时采样地形高度，确保柱脚始终精准贴地（斜坡/平地都对齐）
+    const gY = getGroundHeight(worldX, 9999);
+    const h = height * heightRatio;
+    const bodyW = Math.max(16, width * widthRatio);
+    const segCount = 30;
+    const segH = h / segCount;
+
+    ctx.save();
+    ctx.translate(x, gY);
+    const drawBlock = (x0, y0, w0, h0, fill, stroke) => {
+        ctx.fillStyle = fill;
+        ctx.fillRect(x0, y0, w0, h0);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x0, y0, w0, h0);
+    };
+
+    // 中轴骨架，保证高柱不会从中段视觉断裂
+    drawBlock(-bodyW * 0.16, -h, bodyW * 0.32, h, "rgba(246,240,242,0.95)", "rgba(145,108,116,0.2)");
+
+    let y = -h;
+    for (let i = 0; i < segCount; i++) {
+        const hh = segH * (0.68 + (i % 5) * 0.07);
+        const ww = bodyW * (0.50 + (i % 7) * 0.06);
+        const xx = -ww * 0.5 + ((i % 2) ? bodyW * 0.022 : -bodyW * 0.022);
+        const fill = (i % 2)
+            ? "rgba(252,248,248,0.98)"
+            : "rgba(242,232,236,0.95)";
+        drawBlock(xx, y, ww, hh, fill, "rgba(132,95,104,0.34)");
+
+        // 小正方形插片，提升细碎层次
+        if (i % 2 === 0) {
+            const sq = Math.max(5, ww * (0.12 + (i % 3) * 0.03));
+            const sx = (i % 4 < 2) ? (xx + ww * 0.18) : (xx + ww * 0.62 - sq);
+            drawBlock(sx, y + hh * 0.2, sq, sq, "rgba(250,246,246,0.95)", "rgba(132,95,104,0.24)");
+        }
+
+        // 细边框条，模拟参考图的几何分段感
+        if (i % 3 === 1) {
+            const bandH = Math.max(2, hh * 0.12);
+            drawBlock(xx - bodyW * 0.06, y + hh * 0.44, ww + bodyW * 0.12, bandH, "rgba(246,240,241,0.92)", "rgba(132,95,104,0.24)");
+        }
+        y += hh;
+    }
+
+    drawBlock(-bodyW * 0.92, -h - segH * 0.8, bodyW * 1.84, segH * 0.8, "rgba(250,246,246,0.98)", "rgba(132,95,104,0.30)");
+    drawBlock(-bodyW * 0.84, -segH * 1.0, bodyW * 1.68, segH * 1.0, "rgba(248,242,243,0.98)", "rgba(132,95,104,0.30)");
+    ctx.restore();
+}
+
+function getRampPlatformReveal01() {
+    if (!scene2Ramp.flatUnlocked) return 0;
+    const t = Math.max(0, Math.min(1, (performance.now() - scene2Ramp.unlockedAt) / SCENE2_PLATFORM_REVEAL_MS));
+    return t * t * (3 - 2 * t);
+}
+
+function drawRampTurnpointColumnsBack() {
+    if (!scene2Ramp.flatUnlocked) return;
+    const reveal = getRampPlatformReveal01();
+    if (reveal < 0.35) return;
+    // 后景柱：稍细、稍矮、稍浅，制造纵深
+    const xBack = scene2Ramp.flatStartX + 90;
+    drawRuinColumnStack(xBack, 2.7, 0.0185);
+}
+
+function drawRampTurnpointColumnsFront() {
+    if (!scene2Ramp.flatUnlocked) return;
+    const reveal = getRampPlatformReveal01();
+    if (reveal < 0.72) return;
+    // 前景柱：更粗一点、层数更密（由 drawRuinColumnStack 内部分段保证）
+    const xFront = scene2Ramp.flatStartX + 250;
+    drawRuinColumnStack(xFront, 3.05, 0.022);
+}
+
+function drawGiantBird() {
+    if (!giantBird.active) return;
+    ctx.save(); ctx.globalAlpha = giantBird.alpha; ctx.fillStyle = "#111"; 
+    const bx = giantBird.x, by = giantBird.y + Math.sin(giantBird.flap * 0.5) * 25, sc = width * 0.22, flap = Math.sin(giantBird.flap) * 0.5; 
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + sc * 0.6, by - sc * 0.02); ctx.lineTo(bx + sc * 0.6, by + sc * 0.02); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - sc * 0.12, by + 10); ctx.lineTo(bx, by + 20); ctx.fill();
+    ctx.save(); ctx.translate(bx + sc * 0.25, by); ctx.rotate(flap); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sc * 0.4, -sc * 0.6); ctx.lineTo(sc * 0.1, -sc * 0.5); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.translate(bx + sc * 0.35, by); ctx.rotate(-flap); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sc * 0.4, sc * 0.6); ctx.lineTo(sc * 0.1, sc * 0.5); ctx.fill(); ctx.restore();
+    ctx.restore();
+}
+
+function drawBirdSwarm() {
+    birdsSwarm.forEach(b => {
+        if (!b.active) return;
+        const bx = b.x - camera.x;
+        const by = b.y + Math.sin(b.offset) * 10;
+        const wing = Math.sin(b.offset * 1.8) * (b.size * 2.6);
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.scale(b.dir, 1);
+        ctx.fillStyle = "#101010";
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-b.size * 5, -wing);
+        ctx.lineTo(-b.size * 2.2, -b.size * 0.8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-b.size * 5, wing);
+        ctx.lineTo(-b.size * 2.2, b.size * 0.8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    });
+    ctx.globalAlpha = 1.0;
+}
+
+function drawWhiteBirds() {
+    whiteBirds.forEach(b => {
+        const bx = b.x - camera.x;
+        if (bx < -220 || bx > width + 220) return;
+        const by = b.y + Math.sin(b.flap * 0.8) * 6;
+        const wing = Math.sin(b.flap) * (b.size * 2.1);
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-b.size * 4.2, -wing);
+        ctx.lineTo(-b.size * 2.1, -b.size * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-b.size * 4.2, wing);
+        ctx.lineTo(-b.size * 2.1, b.size * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    });
+}
+
+function drawWatercolorBlobs() {
+    watercolorBlobs.forEach(w => {
+        const t = Date.now() * 0.0002 + w.phase;
+        const g = ctx.createRadialGradient(w.x, w.y, 0, w.x, w.y, Math.max(w.rx, w.ry) * 1.2);
+        g.addColorStop(0, `rgba(255,210,215,${w.a})`);
+        g.addColorStop(0.55, `rgba(238,170,178,${w.a * 0.65})`);
+        g.addColorStop(1, "rgba(230,150,162,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        const steps = 30;
+        for (let i = 0; i <= steps; i++) {
+            const a = (i / steps) * Math.PI * 2;
+            const n1 = Math.sin(a * 3 + t + w.x * 0.0012) * 0.28;
+            const n2 = Math.cos(a * 7 - t * 1.3 + w.y * 0.0009) * 0.18;
+            const rx = w.rx * (1 + n1 + n2);
+            const ry = w.ry * (1 + n1 * 0.8 - n2 * 0.6);
+            const x = w.x + Math.cos(a) * rx;
+            const y = w.y + Math.sin(a) * ry;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+    });
+}
+
+function drawMountainTrees(list, alphaMul = 1) {
+    if (transition.scene2Blend < 0.01) return;
+    list.forEach(t => {
+        const x = t.x - camera.x;
+        if (x < -120 || x > width + 120) return;
+        const groundY = getGroundHeight(t.x, 9999);
+        ctx.fillStyle = `rgba(255,255,255,${0.62 * alphaMul})`;
+        const topX = x + t.lean * 10;
+        const topY = groundY - t.h;
+        ctx.beginPath();
+        ctx.moveTo(x - t.w * 0.4, groundY);
+        ctx.lineTo(x + t.w * 0.4, groundY);
+        ctx.lineTo(topX + t.w * 0.65, topY);
+        ctx.lineTo(topX - t.w * 0.65, topY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(topX, topY, t.w * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function drawFloatingShards(frontLayer = false) {
+    if (transition.scene2Blend < SCENE2_SHARDS_SHOW_BLEND || !windTransition.done) return;
+    floatingShards.forEach(s => {
+        if (!!s.frontLayer !== !!frontLayer) return;
+        const rp = Math.max(0, Math.min(1, s.revealProgress || 0));
+        if (rp <= 0.001) return;
+        const x = s.x + (s.windOffset || 0) - camera.x;
+        if (x < -260 || x > width + 260) return;
+        const groundY = getGroundHeight(s.x, 9999);
+        const entryEase = rp * rp * (3 - 2 * rp);
+        const dropFromSky = (1 - entryEase) * (s.entryDropPx || (height * 0.2));
+        const y = groundY - s.yOffset - dropFromSky + Math.sin(s.bob) * s.bobAmp;
+        s.rot += s.rotSpd;
+        const shardScale = 0.5;
+        const lit = 0.5 + 0.5 * Math.sin(s.rot + s.x * 0.0002);
+        const useAccent = s.colorGroup === 'frontAccent';
+        const baseBody = useAccent
+            ? [166 + Math.round(lit * 34), 70 + Math.round(lit * 18), 98 + Math.round(lit * 24)]
+            : [132 + Math.round(lit * 30), 42 + Math.round(lit * 14), 62 + Math.round(lit * 20)];
+
+        // 主体 + 分面 + 边缘高光，增强碎石立体感
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(s.rot);
+        ctx.scale(shardScale, shardScale);
+        ctx.globalAlpha = rp;
+
+        ctx.fillStyle = `rgb(${baseBody[0]},${baseBody[1]},${baseBody[2]})`;
+        ctx.beginPath();
+        ctx.moveTo(s.poly[0].x, s.poly[0].y);
+        for (let i=1; i<s.poly.length; i++) ctx.lineTo(s.poly[i].x, s.poly[i].y);
+        ctx.closePath();
+        ctx.fill();
+
+        const cx = s.poly.reduce((sum, p) => sum + p.x, 0) / s.poly.length;
+        const cy = s.poly.reduce((sum, p) => sum + p.y, 0) / s.poly.length;
+        for (let i=0; i<s.poly.length; i++) {
+            const a = s.poly[i];
+            const b = s.poly[(i + 1) % s.poly.length];
+            const faceLit = 0.5 + 0.5 * Math.sin(s.rot + i * 1.13);
+            const fr = (useAccent ? 148 : 118) + Math.round(faceLit * (useAccent ? 44 : 42));
+            const fg = (useAccent ? 56 : 34) + Math.round(faceLit * (useAccent ? 20 : 16));
+            const fb = (useAccent ? 84 : 52) + Math.round(faceLit * (useAccent ? 28 : 24));
+            ctx.fillStyle = `rgb(${fr},${fg},${fb})`;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = useAccent ? 'rgb(246,206,214)' : 'rgb(224,176,186)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(s.poly[0].x, s.poly[0].y);
+        for (let i=1; i<s.poly.length; i++) ctx.lineTo(s.poly[i].x, s.poly[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+    });
+}
+
+function drawRubbleDragonbonesMid() {
+    if (transition.scene2Blend < 0.01) return;
+    rubbleDragonbonesMid.forEach(b => {
+        const x = b.x - camera.x;
+        if (x < -180 || x > width + 180) return;
+        const gY = getGroundHeight(b.x, 9999) - b.yLift;
+        const h = b.h;
+        const w = b.w;
+        const lean = b.tilt;
+        const topX = x + lean * h * 0.42;
+        const baseL = x - w * 0.5;
+        const baseR = x + w * 0.5;
+
+        // 主体长三角（白色碎石龙骨）
+        ctx.fillStyle = `rgba(${220 + Math.round(b.tone * 24)},${220 + Math.round(b.tone * 22)},${224 + Math.round(b.tone * 20)},${b.alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(topX, gY - h);
+        ctx.lineTo(baseR, gY);
+        ctx.lineTo(baseL, gY);
+        ctx.closePath();
+        ctx.fill();
+
+        // 四边形分面 1
+        ctx.fillStyle = `rgba(${198 + Math.round(b.tone * 20)},${198 + Math.round(b.tone * 18)},${204 + Math.round(b.tone * 18)},${Math.min(1, b.alpha + 0.1)})`;
+        ctx.beginPath();
+        ctx.moveTo(topX - w * 0.08, gY - h * 0.78);
+        ctx.lineTo(topX + w * 0.16, gY - h * 0.84);
+        ctx.lineTo(x + w * 0.24, gY - h * 0.28);
+        ctx.lineTo(x - w * 0.02, gY - h * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        // 四边形分面 2（暗面）
+        ctx.fillStyle = `rgba(${170 + Math.round(b.tone * 16)},${170 + Math.round(b.tone * 14)},${178 + Math.round(b.tone * 14)},${Math.min(1, b.alpha + 0.12)})`;
+        ctx.beginPath();
+        ctx.moveTo(topX - w * 0.12, gY - h * 0.7);
+        ctx.lineTo(topX - w * 0.02, gY - h * 0.76);
+        ctx.lineTo(x - w * 0.16, gY - h * 0.12);
+        ctx.lineTo(x - w * 0.32, gY - h * 0.08);
+        ctx.closePath();
+        ctx.fill();
+
+        // 细长次级骨刺（三角）
+        const sTopX = x + w * (0.55 + b.ridge * 0.2);
+        const sTopY = gY - h * (0.45 + b.ridge * 0.35);
+        ctx.fillStyle = `rgba(${228 + Math.round(b.tone * 16)},${228 + Math.round(b.tone * 14)},${232 + Math.round(b.tone * 14)},${Math.min(1, b.alpha + 0.06)})`;
+        ctx.beginPath();
+        ctx.moveTo(sTopX, sTopY);
+        ctx.lineTo(x + w * 0.32, gY - h * 0.02);
+        ctx.lineTo(x + w * 0.16, gY - h * 0.08);
+        ctx.closePath();
+        ctx.fill();
+
+        // 组内“龙骨串”连接感
+        ctx.strokeStyle = `rgba(152,152,160,${0.2 + b.alpha * 0.25})`;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x - w * 0.42, gY - h * 0.06);
+        ctx.lineTo(x + w * 0.44, gY - h * (0.08 + 0.04 * Math.sin((b.groupSeed || 0) * 6.3)));
+        ctx.stroke();
+
+        // 边线
+        ctx.strokeStyle = `rgba(110,110,118,${0.22 + b.alpha * 0.24})`;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(topX, gY - h);
+        ctx.lineTo(baseR, gY);
+        ctx.lineTo(baseL, gY);
+        ctx.closePath();
+        ctx.stroke();
+    });
+}
+
+function drawArchBridge() {
+    if (transition.scene2Blend < 0.01) return;
+    const bridgeStartSx = SCENE2_ARCH_BRIDGE_START_X - camera.x;
+    const bridgeEndSx = SCENE2_ARCH_BRIDGE_END_X - camera.x;
+    if (bridgeEndSx < -300 || bridgeStartSx > width + 300) return;
+
+    const deckY = getScene2ArchBridgeDeckY();
+    const deckTopY = deckY;
+    const bridgeBodyW = bridgeEndSx - bridgeStartSx;
+    const bayW = SCENE2_ARCH_BRIDGE_WIDTH / SCENE2_ARCH_COUNT;
+    const bodyColor = "rgba(252,252,252,0.98)";
+
+    // 实心水平桥面（顶边与平台地面齐平，厚度向下）
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(bridgeStartSx, deckTopY, bridgeBodyW, SCENE2_ARCH_BRIDGE_DECK_THICKNESS);
+
+    const drawBraceRect = (x1, y1, x2, y2, thickness, fill) => {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) return;
+        const ang = Math.atan2(dy, dx);
+        ctx.save();
+        ctx.translate(x1, y1);
+        ctx.rotate(ang);
+        ctx.fillStyle = fill;
+        ctx.fillRect(0, -thickness * 0.5, len, thickness);
+        ctx.restore();
+    };
+
+    // 中大边小：拱门尺寸向两侧递减 + 镂空框架
+    for (let i = 0; i < SCENE2_ARCH_COUNT; i++) {
+        const centerXWorld = SCENE2_ARCH_BRIDGE_START_X + bayW * (i + 0.5);
+        const sx = centerXWorld - camera.x;
+        if (sx < -bayW || sx > width + bayW) continue;
+        const n = (i + 0.5) / SCENE2_ARCH_COUNT; // 0..1
+        const centerFalloff = 1 - Math.abs(n - 0.5) * 2;
+        const scale = 0.55 + centerFalloff * 0.7;
+        const archR = bayW * (0.18 + 0.22 * scale);
+        const archBaseY = deckY + archR + 48; // 拱门整体下移
+        const legBottom = deckY + (SCENE2_ARCH_BRIDGE_HEIGHT * (0.5 + 0.42 * scale));
+        const legW = Math.max(8, bayW * 0.08);
+
+        // 左右立柱
+        ctx.fillStyle = bodyColor;
+        ctx.fillRect(sx - archR - legW, deckY, legW, legBottom - deckY);
+        ctx.fillRect(sx + archR, deckY, legW, legBottom - deckY);
+
+        // 拱门内部矩形钢架：交错斜撑 + 横向矩形梁（只填充，不描线）
+        const leftIn = sx - archR + legW * 0.8;
+        const rightIn = sx + archR - legW * 0.8;
+        const topIn = deckY + 18;
+        const midIn = archBaseY - archR * 0.18;
+        const botIn = Math.min(legBottom - 10, archBaseY + archR * 0.22);
+        const braceColor = "rgba(246,246,248,0.9)";
+        const braceW = Math.max(2, bayW * 0.012);
+
+        // 主 X 交叉
+        drawBraceRect(leftIn, topIn, rightIn, botIn, braceW, braceColor);
+        drawBraceRect(rightIn, topIn, leftIn, botIn, braceW, braceColor);
+        // 二层交错
+        drawBraceRect(leftIn + (rightIn - leftIn) * 0.16, topIn + 4, rightIn - (rightIn - leftIn) * 0.10, midIn, braceW * 0.82, braceColor);
+        drawBraceRect(rightIn - (rightIn - leftIn) * 0.16, topIn + 4, leftIn + (rightIn - leftIn) * 0.10, midIn, braceW * 0.82, braceColor);
+        // 横向矩形梁
+        ctx.fillStyle = braceColor;
+        const beamH = Math.max(2, braceW * 0.72);
+        ctx.fillRect(leftIn + 6, midIn - beamH * 0.5, (rightIn - leftIn) - 12, beamH);
+        ctx.fillRect(leftIn + 10, botIn - 6 - beamH * 0.5, (rightIn - leftIn) - 20, beamH);
+        // 纵向短梁，增加块面细节
+        const colW = Math.max(2, braceW * 0.55);
+        ctx.fillRect(sx - colW * 0.5, topIn + 8, colW, botIn - topIn - 16);
+        ctx.fillRect(sx - archR * 0.34, topIn + 12, colW, midIn - topIn - 6);
+        ctx.fillRect(sx + archR * 0.34 - colW, topIn + 12, colW, midIn - topIn - 6);
+    }
+}
+
+function drawBridgeSkyCurtain() {
+    if (transition.scene2Blend < 0.01) return;
+    if (!skyCurtain.active) return;
+    if (player.x < SCENE2_ARCH_BRIDGE_START_X - 120) return;
+
+    const elapsed = Math.max(0, performance.now() - (skyCurtain.startedAt || performance.now()));
+    const runDist = Math.min(2600, elapsed * 0.9);
+    const span = width * 1.4;
+    const laneN = 22;
+    const dark = "rgba(208,58,74,0.82)";
+    const darker = "rgba(186,46,62,0.86)";
+
+    ctx.save();
+    for (let i = 0; i < laneN; i++) {
+        const seed = i * 1.37 + 0.91;
+        const sx = ((i / (laneN - 1)) * span - width * 0.2) + Math.sin(seed * 2.8) * 24;
+        const w = 14 + (i % 4) * 10;
+        const fallT = Math.max(0, Math.min(1, (runDist - i * 120) / 1400));
+        const ease = fallT * fallT * (3 - 2 * fallT);
+        const h = (height * (0.35 + (i % 5) * 0.11)) * ease;
+        if (h <= 2) continue;
+
+        ctx.fillStyle = (i % 3 === 0) ? darker : dark;
+        ctx.fillRect(sx, -8, w, h);
+
+    }
+
+    // 横向拼接梁，随着奔跑逐段下落出现
+    for (let j = 0; j < 3; j++) {
+        const t = Math.max(0, Math.min(1, (runDist - 520 - j * 420) / 1200));
+        if (t <= 0.01) continue;
+        const e = t * t * (3 - 2 * t);
+        const y = height * (0.18 + j * 0.14) * e;
+        const x = width * (0.08 + j * 0.1);
+        const w = width * (0.68 - j * 0.12);
+        const h = 16 + j * 6;
+        ctx.fillStyle = j === 1 ? darker : dark;
+        ctx.fillRect(x, y, w, h);
+    }
+    ctx.restore();
+}
+
+function drawFarRectTriPeaks() {
+    if (transition.scene2Blend < 0.01) return;
+    farRectTriPeaks.forEach(p => {
+        const x = p.x - camera.x;
+        if (x < -460 || x > width + 460) return;
+        const gY = getGroundHeight(p.x, 9999) - p.yLift;
+        const topX = x + p.skew * p.h;
+        const topY = gY - p.h;
+        const halfW = p.w * 0.5;
+
+        // 矩形化三角主峰
+        ctx.fillStyle = `rgba(196,130,142,${p.alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(topX - halfW * 0.05, topY);
+        ctx.lineTo(x + halfW, gY);
+        ctx.lineTo(x - halfW, gY);
+        ctx.closePath();
+        ctx.fill();
+
+        // 切面矩形块，模拟参考图中的大片几何面
+        ctx.fillStyle = `rgba(222,168,178,${p.alpha * 0.7})`;
+        ctx.beginPath();
+        ctx.moveTo(topX - halfW * 0.12, topY + p.h * 0.26);
+        ctx.lineTo(topX + halfW * 0.33, topY + p.h * 0.22);
+        ctx.lineTo(x + halfW * 0.19, gY - p.h * 0.08);
+        ctx.lineTo(x - halfW * 0.24, gY - p.h * 0.02);
+        ctx.closePath();
+        ctx.fill();
+    });
+}
+
+function drawWindTransitionColumn() {
+    if (player.x >= SCENE2_RAMP_START_X - 120) return;
+    const x = windTransition.columnX - camera.x;
+    if (x < -180 || x > width + 180) return;
+    const gY = getGroundHeight(windTransition.columnX, 9999);
+    const h = height * 0.10;
+    const w = h * 0.5;
+    const windN = Math.max(0, Math.min(1, windTransition.intensity / 100));
+    const sway = Math.sin(performance.now() * 0.004) * 1.1 * windN;
+
+    ctx.save();
+    ctx.translate(x + sway, gY);
+    ctx.fillStyle = 'rgb(16,16,16)';
+    // T 顶横梁
+    ctx.fillRect(-w, -h, w * 2, h * 0.24);
+    // T 竖干
+    ctx.fillRect(-w * 0.18, -h, w * 0.36, h);
+    ctx.restore();
+}
+
+function drawWindInkOverlay() {
+    const windN = Math.max(0, Math.min(1, windTransition.intensity / 100));
+    if (windN < 0.02) return;
+    const now = performance.now() * 0.001;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = 0; i < 7; i++) {
+        const y = height * (0.12 + i * 0.16) + Math.sin(now * (1.1 + i * 0.2) + i * 1.7) * (12 + i * 8);
+        const amp = (52 + i * 19) * windN;
+        const xOffset = (now * (340 + i * 125) * windN) % (width + 380) - 190;
+        const g = ctx.createLinearGradient(xOffset - amp, y - 24, xOffset + width * 0.75, y + 26);
+        g.addColorStop(0, `rgba(70,40,52,${0.04 + windN * 0.08})`);
+        g.addColorStop(0.5, `rgba(120,72,88,${0.08 + windN * 0.12})`);
+        g.addColorStop(1, 'rgba(20,12,16,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(-220, y - 16);
+        ctx.bezierCurveTo(width * 0.24, y - amp * 0.22, width * 0.56, y + amp * 0.18, width + 220, y + 12);
+        ctx.lineTo(width + 220, y + 42);
+        ctx.bezierCurveTo(width * 0.64, y + amp * 0.28, width * 0.25, y - amp * 0.12, -220, y + 22);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawWindDebugHUD() {
+    if (!debugWindHUD) return;
+    const lines = [
+        `wind.phase: ${windTransition.phase}`,
+        `wind.done: ${windTransition.done}`,
+        `wind.armedAfterDrop: ${windTransition.armedAfterDrop}`,
+        `wind.touchedStairTop: ${windTransition.touchedStairTop}`,
+        `wind.intensity: ${windTransition.intensity.toFixed(1)}`,
+        `player.x: ${Math.round(player.x)}`,
+        `wind.triggerX: ${Math.round(windTransition.triggerX)}`,
+        `wind.columnX: ${Math.round(windTransition.columnX)}`
+    ];
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'rgba(0,0,0,0.46)';
+    ctx.fillRect(14, 14, 320, 18 + lines.length * 18);
+    ctx.font = "12px 'Consolas','Microsoft YaHei',sans-serif";
+    ctx.fillStyle = '#e8f4ff';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    lines.forEach((s, i) => ctx.fillText(s, 22, 22 + i * 18));
+    ctx.restore();
+}
+
+function drawSnowAndFlowers() {
+    if (transition.scene2Blend < 0.01) return;
+    const groundY = height - groundH;
+    snowPiles.forEach(s => {
+        const sx = s.x - camera.x;
+        if (sx < -200 || sx > width + 200) return;
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.beginPath();
+        ctx.moveTo(sx - s.w * 0.5, groundY);
+        ctx.quadraticCurveTo(sx - s.w * 0.22, groundY - s.h * 0.95, sx, groundY - s.h);
+        ctx.quadraticCurveTo(sx + s.w * 0.24, groundY - s.h * 0.9, sx + s.w * 0.5, groundY);
+        ctx.closePath();
+        ctx.fill();
+    });
+    redFlowers.forEach(f => {
+        const fx = f.x - camera.x;
+        if (fx < -50 || fx > width + 50) return;
+        const tipX = fx + Math.sin(f.tilt) * 2.6;
+        const tipY = groundY - f.h;
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(fx, groundY);
+        ctx.lineTo(tipX, tipY);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.beginPath();
+        ctx.arc(tipX, tipY, f.r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+
+function drawOrganicBranch(v) {
+    const vx = v.x - camera.x; if(vx < -200 || vx > width + 200) return;
+    const t = transition.scene2Blend;
+    const branchColor = t > 0 ? lerpColor("000000", "ffffff", t) : "#000";
+    const slopeSinkY = (v.x >= SCENE2_RAMP_START_X) ? 12 : 0;
+    ctx.save(); ctx.translate(vx, getGroundHeight(v.x, 9999) + slopeSinkY); ctx.scale(1, v.growth); ctx.fillStyle = branchColor;
+    ctx.beginPath(); ctx.moveTo(-v.thickness / 2, 0); 
+    ctx.bezierCurveTo(v.curvePoints[1].dx - v.thickness / 2.5, v.curvePoints[1].dy, v.curvePoints[2].dx - v.thickness / 6, v.curvePoints[2].dy, v.curvePoints[3].dx, v.curvePoints[3].dy);
+    ctx.bezierCurveTo(v.curvePoints[2].dx + v.thickness / 10, v.curvePoints[2].dy, v.curvePoints[1].dx + v.thickness / 3, v.curvePoints[1].dy, v.thickness / 2, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+}
+
+function drawLinedMountain(speed, fill, stroke, baseY, amp, seed) {
+    const worldOffset = camera.x * speed; ctx.beginPath(); ctx.moveTo(camera.x - width*5, height * 15);
+    const pts = [];
+    for (let x = camera.x - width*5; x < camera.x + width*5; x += 38) {
+        const posX = x + worldOffset;
+        const macro = Math.sin(posX * 0.00062 + seed * 1.17) * 1.15 + Math.sin(posX * 0.0017 + seed * 1.9) * 0.54;
+        const jag = Math.sin(posX * 0.012 + seed * 3.7) * 0.22 + Math.sin(posX * 0.028 + seed * 1.6) * 0.12;
+        const cusp = (Math.abs(Math.sin(posX * 0.007 + seed * 4.2)) - 0.5) * 0.34;
+        const noise = macro + jag + cusp;
+        pts.push({x: x - camera.x, y: baseY + noise * (amp * 0.82)});
+    }
+    pts.forEach(p => ctx.lineTo(p.x, p.y)); ctx.lineTo(camera.x + width*5, height * 15); ctx.fillStyle = fill; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); pts.forEach(p => ctx.lineTo(p.x, p.y)); ctx.strokeStyle = stroke; ctx.stroke();
+}
+
+function drawVoidFallBg0Only() {
+    if (isImageReady(images.bg)) ctx.drawImage(images.bg, 0, 0, width, height);
+    else {
+        ctx.fillStyle = SKY_COLOR;
+        ctx.fillRect(0, 0, width, height);
+    }
+}
+
+/** 下坠段氛围：上深黑、下微紫，贴近参考竖线流星底衬 */
+function drawVoidFallDepthGradient() {
+    const g = ctx.createLinearGradient(0, 0, 0, height);
+    g.addColorStop(0, 'rgba(0,0,0,0.42)');
+    g.addColorStop(1, 'rgba(26,26,46,0.55)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, width, height);
+}
+
+function drawVoidFallBgsFromBg1(elapsedMs) {
+    if (elapsedMs < VOID_BG1_START_MS || !isImageReady(images.bg1)) return;
+
+    let rawU = (elapsedMs - VOID_BG1_START_MS) / (VOID_FALL_MS - VOID_BG1_START_MS);
+    rawU = Math.max(0, Math.min(1, rawU));
+    const u = rawU * rawU * (3 - 2 * rawU);
+
+    if (u >= 0.995) {
+        ctx.drawImage(images.bg1, 0, 0, width, height);
+        return;
+    }
+
+    const feather = height * 0.55;
+    const rise = u * (height + feather * 0.4);
+    const edge = height - rise;
+
+    ctx.save();
+    ctx.globalAlpha = 0.1 * Math.pow(u, 0.85);
+    ctx.drawImage(images.bg1, 0, 0, width, height);
+    ctx.restore();
+
+    const tc = getVoidBlendCanvas();
+    const tctx = tc.getContext('2d');
+    tctx.clearRect(0, 0, width, height);
+    tctx.drawImage(images.bg1, 0, 0, width, height);
+    tctx.globalCompositeOperation = 'destination-in';
+    const y0 = Math.max(0, edge - feather);
+    const g = tctx.createLinearGradient(0, y0, 0, height);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.15, `rgba(255,255,255,${0.08 + u * 0.18})`);
+    g.addColorStop(0.38, `rgba(255,255,255,${0.28 + u * 0.32})`);
+    g.addColorStop(0.62, `rgba(255,255,255,${0.55 + u * 0.28})`);
+    g.addColorStop(0.84, `rgba(255,255,255,${0.82 + u * 0.12})`);
+    g.addColorStop(1, 'rgba(255,255,255,1)');
+    tctx.fillStyle = g;
+    tctx.fillRect(0, 0, width, height);
+    tctx.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.filter = 'blur(4px)';
+    ctx.globalAlpha = 0.92 + u * 0.08;
+    ctx.drawImage(tc, 0, 0);
+    ctx.restore();
+    ctx.filter = 'none';
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = 0.07 * u;
+    ctx.drawImage(images.bg1, 0, 0, width, height);
+    ctx.restore();
+}
+
+function drawVoidFallAmbient(elapsedMs) {
+    const driftUp = elapsedMs * 0.14 + (player.y - voidFall.startPlayerY) * 0.05;
+    ambientStorm.forEach(p => {
+        let py = (p.y - driftUp) % (height + 40);
+        if (py < -5) py += height + 40;
+        ctx.globalAlpha = Math.min(0.95, p.alpha * 1.35);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(p.x, py, p.size * 1.15, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+/** 人类式眨眼：快闭慢开，非正弦 */
+function getEyeBlinkOpen(nowMs) {
+    const c = 4000;
+    const p = nowMs % c;
+    if (p < 3100) return 1;
+    if (p < 3185) {
+        const u = (p - 3100) / 85;
+        return 1 - u * u;
+    }
+    if (p < 3235) return 0.04;
+    if (p < 3375) {
+        const u = (p - 3235) / 140;
+        return 0.04 + (1 - 0.04) * (1 - Math.pow(1 - u, 2.4));
+    }
+    return 1;
+}
+
+/**
+ * 屏幕正中的几何「眼」：同心圆 + 中心品红晕 + 水平轴 + 虚线外环；眨眼表现为整体缩放/透明度。
+ * fadeMul：渐显；close01：落地后闭合为线并消失；nowMs：眨眼时钟。
+ */
+function drawGiantVoidEyeScreenCenter(fadeMul, close01, nowMs) {
+    if (fadeMul <= 0.02) return;
+    const pClose = Math.max(0, close01 || 0);
+    const cx = width * 0.5;
+    const cy = height * 0.5;
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    if (pClose >= 0.18) {
+        const u = Math.min(1, (pClose - 0.18) / 0.82);
+        const halfW = width * 0.22 * (1 - u) * (1 - u * 0.18);
+        ctx.globalAlpha = fadeMul * (1 - u * 0.22);
+        ctx.strokeStyle = 'rgba(255,250,252,0.94)';
+        ctx.lineWidth = Math.max(0.4, 2.8 * (1 - u * 0.88));
+        ctx.beginPath();
+        ctx.moveTo(-halfW, 0);
+        ctx.lineTo(halfW, 0);
+        ctx.stroke();
+        ctx.restore();
+        return;
+    }
+
+    const blinkOpen = getEyeBlinkOpen(nowMs) * Math.max(0.12, 1 - pClose * 3.2);
+    const ringScale = blinkOpen * (1 - pClose * 0.95);
+    const m = Math.min(width, height);
+
+    ctx.save();
+    ctx.scale(ringScale, ringScale);
+
+    const glowR = m * 0.2;
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+    glow.addColorStop(0, 'rgba(255, 95, 210, 0.72)');
+    glow.addColorStop(0.35, 'rgba(220, 50, 175, 0.38)');
+    glow.addColorStop(0.72, 'rgba(150, 30, 120, 0.1)');
+    glow.addColorStop(1, 'rgba(60, 8, 45, 0)');
+    ctx.fillStyle = glow;
+    ctx.globalAlpha = fadeMul * 0.9;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowR * 1.06, 0, Math.PI * 2);
+    ctx.fill();
+
+    const radii = [m * 0.072, m * 0.118, m * 0.168, m * 0.218];
+    ctx.lineJoin = 'round';
+    radii.forEach((r, i) => {
+        ctx.globalAlpha = fadeMul * (0.84 - i * 0.07);
+        ctx.strokeStyle = 'rgba(255,255,255,0.93)';
+        ctx.lineWidth = i === 0 ? 1.35 : 1.05;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+    });
+
+    ctx.globalAlpha = fadeMul * 0.92;
+    ctx.fillStyle = 'rgba(255,255,255,0.97)';
+    const nodeR = Math.max(2.2, m * 0.0065);
+    const nodeSpecs = [
+        [1, 0],
+        [1, Math.PI * 0.62],
+        [1, Math.PI * 1.25],
+        [2, Math.PI * 0.35],
+        [2, Math.PI * 0.92],
+        [2, Math.PI * 1.7],
+        [3, Math.PI * 0.15],
+        [3, Math.PI * 1.05]
+    ];
+    nodeSpecs.forEach(([ri, ang]) => {
+        const r = radii[ri];
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * r, Math.sin(ang) * r, nodeR, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.globalAlpha = fadeMul * 0.78;
+    ctx.strokeStyle = 'rgba(255,255,255,0.48)';
+    ctx.lineWidth = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-m * 0.26, 0);
+    ctx.lineTo(m * 0.26, 0);
+    ctx.stroke();
+
+    ctx.setLineDash([5, 9]);
+    ctx.globalAlpha = fadeMul * 0.4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, radii[3] * 1.32, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.restore();
+    ctx.restore();
+}
+
+function draw() {
+    if (voidFall.phase === 'falling') {
+        const fel = performance.now() - voidFall.startTime;
+        const totalShake = transition.shake + camera.shakeLand;
+        const shX = (Math.random() - 0.5) * totalShake;
+        const shY = (Math.random() - 0.5) * totalShake * 0.82;
+        drawVoidFallBg0Only();
+        drawVoidFallDepthGradient();
+        drawVoidFallBgsFromBg1(fel);
+        drawVoidLineMeteorsScreen();
+        drawVoidFallAmbient(fel);
+        if (poemData.show && poemData.alpha > 0.001) {
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = poemData.alpha; ctx.fillStyle = "#fff";
+            const startY = poemData.isFirst ? height * 0.15 : height * 0.30;
+            const textX = poemData.isFirst ? width / 2 : width / 2 + width * 0.08;
+            poemData.lines.forEach((line, i) => {
+                ctx.font = "100 20px 'Microsoft YaHei'";
+                ctx.fillText(line, textX, startY + i * 48);
+            });
+            ctx.globalAlpha = 1.0;
+        }
+        if (fel >= VOID_EYE_MS) {
+            const fade = Math.min(1, (fel - VOID_EYE_MS) / 1500);
+            drawGiantVoidEyeScreenCenter(fade, 0, performance.now());
+        }
+        let squatY = 1;
+        if (voidFall.fallState === 'hardLanding') squatY = 0.79;
+        else if (voidFall.fallState === 'recoverStand' && voidFall.recoverAt > 0) {
+            const rp = Math.min(1, (performance.now() - voidFall.recoverAt) / RECOVER_STAND_MS);
+            squatY = 0.79 + 0.21 * (rp * rp * (3 - 2 * rp));
+        }
+        let fallRot = 0, fallSx = 1, fallSy = 1;
+        if (voidFall.fallState === 'freeFall' && fel >= VOID_FALL_POSE_DELAY_MS) {
+            const sp = Math.min(1, (fel - VOID_FALL_POSE_DELAY_MS) / 480);
+            const vN = Math.min(1, Math.abs(player.vy) / VOID_TERM_VELOCITY);
+            fallRot = player.facing * (0.11 + vN * 0.2) * sp;
+            fallSx = 1 - (0.06 + vN * 0.05) * sp;
+            fallSy = 1 + (0.05 + vN * 0.12) * sp;
+        }
+        ctx.save();
+        ctx.translate(width / 2 + shX, height / 2 + shY);
+        ctx.scale(camera.zoom, camera.zoom);
+        ctx.translate(-width / 2, -height / 2 - camera.y);
+        drawLandingDustWorld();
+        drawVoidCapeBehindPlayer();
+        const pImgsV = images[player.state];
+        if (pImgsV && pImgsV[player.frame] && isImageReady(pImgsV[player.frame])) {
+            const curImg = pImgsV[player.frame], px = player.x - camera.x + player.width / 2, py = player.y + player.height / 2;
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(player.rotation + fallRot);
+            ctx.scale(player.facing * fallSx, fallSy * squatY);
+            ctx.drawImage(curImg, -player.width / 2, -player.height / 2, player.width, player.height);
+            ctx.restore();
+        }
+        ctx.restore();
+        return;
+    }
+
+    ctx.fillStyle = SKY_COLOR; ctx.fillRect(0, 0, width, height);
+    if (isImageReady(images.bg)) ctx.drawImage(images.bg, 0, 0, width, height);
+    if (transition.scene2Blend > 0.001 && isImageReady(images.bg1)) {
+        ctx.globalAlpha = transition.scene2Blend;
+        ctx.drawImage(images.bg1, 0, 0, width, height);
+        ctx.globalAlpha = 1.0;
+    }
+    drawBridgeSkyCurtain();
+    // 旧版代码风大画面已停用，转场由视频层接管
+    if (transition.scene2Blend > 0.01) drawWatercolorBlobs();
+    
+    ambientStorm.forEach(p => { ctx.globalAlpha = p.alpha; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1.0; drawGiantBird();
+    if (transition.scene2Blend > 0.01) drawWhiteBirds();
+
+    if (poemData.show && poemData.alpha > 0.001) {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = poemData.alpha; ctx.fillStyle = "#fff";
+        const startY = poemData.isFirst ? height * 0.15 : height * 0.30;
+        const textX = poemData.isFirst ? width / 2 : width / 2 + width * 0.08;
+        poemData.lines.forEach((line, i) => { 
+            ctx.font = "100 20px 'Microsoft YaHei'"; 
+            ctx.fillText(line, textX, startY + i*48); 
+        });
+        ctx.globalAlpha = 1.0;
+    }
+
+    expansionRings.forEach(r => {
+        const cx = (typeof r.x === 'number') ? (r.x - camera.x) : (width / 2);
+        const cy = (typeof r.y === 'number') ? (r.y - camera.y) : (height / 2);
+        const lw = r.lineW || 1.5;
+        ctx.save();
+        // 模糊外环（柔光层）
+        ctx.strokeStyle = `rgba(255,245,248,${Math.max(0, r.alpha * 0.32)})`;
+        ctx.lineWidth = lw * (1.9 + (r.glowMul || 1) * 0.15);
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = `rgba(255,245,248,${Math.min(1, r.alpha * 0.85)})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r.r + 0.6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 核心细线环
+        ctx.strokeStyle = `rgba(255,245,248,${r.alpha})`;
+        ctx.lineWidth = lw;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = `rgba(255,245,248,${Math.min(1, r.alpha * 0.8)})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    });
+    holyRings.forEach(r => {
+        ctx.beginPath();
+        ctx.arc(width / 2, height / 2, r.r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,235,240,${r.alpha})`;
+        ctx.lineWidth = r.lineW;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(width / 2, height / 2, r.r + 14, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,190,205,${r.alpha * 0.7})`;
+        ctx.lineWidth = Math.max(1, r.lineW * 0.45);
+        ctx.stroke();
+    });
+
+    let eyeCloseP = 0;
+    if (voidFall.phase === 'eyeClose') {
+        eyeCloseP = Math.min(1, (performance.now() - voidFall.eyeCloseStart) / VOID_EYE_CLOSE_MS);
+    }
+    if (voidFall.phase === 'eyeFollow' || voidFall.phase === 'eyeClose') {
+        drawGiantVoidEyeScreenCenter(1, eyeCloseP, performance.now());
+    }
+
+    ctx.save();
+    const shakeTotal = transition.shake + camera.shakeLand;
+    const shakeX = (Math.random() - 0.5) * shakeTotal;
+    const shakeY = (Math.random() - 0.5) * shakeTotal * 0.8;
+    ctx.translate(width/2 + shakeX, height/2 + shakeY); ctx.scale(camera.zoom, camera.zoom); ctx.translate(-width/2, -height/2 - camera.y);
+
+    // 两关都保留线条山脉（第二关会按 blend 改变配色）
+    const mtH11 = height * 0.04, mtH15 = height * 0.12;
+    for (let i = 0; i < 10; i++) {
+        const speed = i < 6 ? 0.008 + i * 0.01 : 0.08 + (i - 6) * 0.06;
+        const baseY = height - groundH - (i < 6 ? mtH15 * (0.04 + i / 5 * 0.62) : mtH11 * (0.03 + (i - 6) / 3 * 0.72));
+        if (i === 3 && transition.scene2Blend < 0.01) {
+            mtn01Instances.forEach(inst => {
+                if (isImageReady(images.mtn01)) {
+                    const mh = height * 0.13;
+                    ctx.drawImage(images.mtn01, inst.x - camera.x, baseY - mh + 40, mh * (images.mtn01.width / images.mtn01.height), mh);
+                }
+            });
+        }
+        const fillC = i < 6 ? lerpColor("ededed", "f4d6dc", transition.scene2Blend) : lerpColor("f7f7f7", "f8dfe4", transition.scene2Blend);
+        const strokeAlpha = i < 6 ? 0.05 + i / 5 * 0.15 : 0.3 + (i - 6) / 3 * 0.3;
+        const strokeR = Math.round(60 + (190 - 60) * transition.scene2Blend);
+        const strokeG = Math.round(60 + (150 - 60) * transition.scene2Blend);
+        const strokeB = Math.round(60 + (160 - 60) * transition.scene2Blend);
+        drawLinedMountain(speed, fillC, `rgba(${strokeR},${strokeG},${strokeB},${strokeAlpha})`, baseY, i < 6 ? 20 + i * 5 : 35, i * 1234);
+        if (i === 8 && transition.scene2Blend < 0.01) {
+            mtn02Instances.forEach(inst => {
+                if (isImageReady(images.mtn02)) {
+                    const mh2 = height * 0.25;
+                    ctx.drawImage(images.mtn02, inst.x - camera.x, height - groundH - mh2 + 50, mh2 * (images.mtn02.width / images.mtn02.height), mh2);
+                }
+            });
+        }
+    }
+    drawMountainTrees(mountainTreesFar, 0.58);
+
+    romanColumns.forEach(drawRomanColumn);
+    drawWindTransitionColumn();
+    drawScene2SkyColumn();
+    drawRampTurnpointColumnsBack();
+    
+    // ✨ 远景/中景武器渲染
+    weapons.filter(w => w.depth > 0.3).forEach(drawWeapon);
+
+    skyStairs.forEach(drawSkyStair);
+    ctx.fillStyle = transition.scene2Blend > 0 ? lerpColor("000000", "ffffff", transition.scene2Blend) : "#000";
+    ctx.fillRect(camera.x - 50000, height - groundH, 250000, height * 20);
+    if (player.x >= SCENE2_RAMP_START_X - width) {
+        ctx.fillStyle = "rgba(255,255,255,1)";
+        ctx.beginPath();
+        const startX = SCENE2_RAMP_START_X - camera.x;
+        const startY = scene2RampEdgeYVisual(SCENE2_RAMP_START_X);
+        const rampDrawFarX = startX + width * SCENE2_RAMP_DRAW_EXTEND;
+        const rampDrawFarY = scene2RampEdgeYVisual(SCENE2_RAMP_START_X + width * SCENE2_RAMP_DRAW_EXTEND);
+        const revealEase = getRampPlatformReveal01();
+
+        // 1. 回到地平线起点深处
+        ctx.moveTo(startX, height + 5000); 
+        // 2. 连接到斜坡起点
+        ctx.lineTo(startX, startY); 
+
+        if (scene2Ramp.flatUnlocked && revealEase >= 0.995) {
+            const flatX = scene2Ramp.flatStartX - camera.x;
+            const platformExtend = width * SCENE2_RAMP_DRAW_EXTEND * revealEase;
+            const platformEndX = Math.min(flatX + platformExtend, SCENE2_ARCH_BRIDGE_START_X - camera.x);
+            appendRampEdgePath(ctx, SCENE2_RAMP_START_X, scene2Ramp.flatStartX);
+            // 3. 连到山顶边缘
+            // 4. 平地向右延伸
+            ctx.lineTo(platformEndX, scene2Ramp.flatY); 
+            // 5. 沉入极深地底（向右下方收尾）
+            ctx.lineTo(platformEndX, height + 5000); 
+        } else {
+            // 还在爬坡中，画一个向右无限延伸的缓坡
+            // 3. 连到远方边缘
+            appendRampEdgePath(ctx, SCENE2_RAMP_START_X, SCENE2_RAMP_START_X + width * SCENE2_RAMP_DRAW_EXTEND);
+            // 4. 沉入极深地底（向右下方收尾）
+            ctx.lineTo(rampDrawFarX, height + 5000);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // 平台从转折点缓慢“长出”，避免瞬间出现
+        if (scene2Ramp.flatUnlocked && revealEase > 0.01) {
+            const flatX = scene2Ramp.flatStartX - camera.x;
+            const platformExtend = width * SCENE2_RAMP_DRAW_EXTEND * revealEase;
+            const platformEndX = Math.min(flatX + platformExtend, SCENE2_ARCH_BRIDGE_START_X - camera.x);
+            ctx.fillStyle = "rgba(255,255,255,0.98)";
+            ctx.beginPath();
+            ctx.moveTo(flatX, height + 5000);
+            ctx.lineTo(flatX, scene2Ramp.flatY);
+            ctx.lineTo(platformEndX, scene2Ramp.flatY);
+            ctx.lineTo(platformEndX, height + 5000);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 斜坡内部“窗洞”细节：用背景色模拟镂空，形成可透背景的孔洞感
+        const holeWorldX = SCENE2_RAMP_START_X + width * 0.9;
+        const holeX = holeWorldX - camera.x;
+        const holeY = scene2RampEdgeYVisual(holeWorldX) + height * 0.12;
+        const holeRx = Math.max(18, width * 0.026);
+        const holeRy = Math.max(34, height * 0.08);
+        const holeFill = transition.scene2Blend > 0.01
+            ? "rgba(236,168,176,0.95)"
+            : "rgba(234,226,222,0.95)";
+        ctx.fillStyle = holeFill;
+        ctx.beginPath();
+        ctx.ellipse(holeX, holeY, holeRx, holeRy, Math.PI * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(210,210,216,0.6)";
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+
+        // 斜坡纹理：粉灰污渍 + 裂纹线（贴近参考图的纸面破裂感）
+        const rand01 = (n) => {
+            const v = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+            return v - Math.floor(v);
+        };
+        const stainCount = 10;
+        for (let i = 0; i < stainCount; i++) {
+            const seed = i * 13.37 + 0.71;
+            const wxRaw = SCENE2_RAMP_START_X + width * (0.48 + rand01(seed) * 2.0);
+            const wx = Math.min(SCENE2_RAMP_START_X + width * 2.65, wxRaw);
+            const sx = wx - camera.x;
+            const sy = scene2RampEdgeYVisual(wx) + height * (0.06 + rand01(seed + 2.4) * 0.13);
+            const rBase = width * (0.05 + rand01(seed + 4.8) * 0.055);
+            const points = 8;
+            ctx.fillStyle = `rgba(206,186,194,${0.09 + rand01(seed + 1.2) * 0.08})`;
+            ctx.beginPath();
+            for (let p = 0; p < points; p++) {
+                const a = (p / points) * Math.PI * 2;
+                const jitter = 0.68 + rand01(seed + p * 2.1) * 0.68;
+                const rx = rBase * (0.95 + rand01(seed + p * 1.3) * 0.45);
+                const ry = rBase * (0.55 + rand01(seed + p * 1.7) * 0.35);
+                const px = sx + Math.cos(a) * rx * jitter;
+                const py = sy + Math.sin(a) * ry * jitter;
+                if (p === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = "rgba(155,137,147,0.24)";
+        ctx.lineWidth = 0.9;
+        const crackSeeds = [0.22, 0.41, 0.57, 0.73, 0.88];
+        crackSeeds.forEach((s, i) => {
+            const wx = SCENE2_RAMP_START_X + width * (0.4 + s * 1.05);
+            const x0 = wx - camera.x;
+            const y0 = scene2RampEdgeYVisual(wx) + height * (0.07 + (i % 3) * 0.02);
+            const dir = (i % 2 === 0) ? 1 : -1;
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x0 + dir * width * 0.045, y0 - height * 0.016);
+            ctx.lineTo(x0 + dir * width * 0.082, y0 + height * 0.008);
+            ctx.lineTo(x0 + dir * width * 0.11, y0 - height * 0.02);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x0 + dir * width * 0.05, y0 - height * 0.004);
+            ctx.lineTo(x0 + dir * width * 0.07, y0 + height * 0.02);
+            ctx.stroke();
+        });
+
+        // 斜坡边缘矩形锯齿：用小矩形拼出“台阶边”质感
+        const edgeEndX = (scene2Ramp.flatUnlocked && revealEase >= 0.995) ? (scene2Ramp.flatStartX - camera.x) : rampDrawFarX;
+        const edgeEndY = (scene2Ramp.flatUnlocked && revealEase >= 0.995) ? scene2Ramp.flatY : rampDrawFarY;
+        const edgeDx = edgeEndX - startX;
+        const edgeDy = edgeEndY - startY;
+        const edgeLen = Math.hypot(edgeDx, edgeDy);
+        const visibleDetailLen = Math.min(edgeLen, width * 1.8);
+        if (visibleDetailLen > 8) {
+            const edgeAng = Math.atan2(edgeDy, edgeDx);
+            ctx.save();
+            ctx.translate(startX, startY);
+            ctx.rotate(edgeAng);
+            ctx.fillStyle = "rgba(255,255,255,0.96)";
+            const toothW = 12;
+            const toothH = 10;
+            const toothGap = 14;
+            for (let d = 0; d < visibleDetailLen; d += toothGap) {
+                ctx.fillRect(d, -toothH, toothW, toothH);
+            }
+            ctx.restore();
+        }
+
+        // 画一条边缘线强调踩踏感
+        ctx.strokeStyle = "rgba(220,220,225,0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        if (scene2Ramp.flatUnlocked && revealEase >= 0.995) {
+            const flatX = scene2Ramp.flatStartX - camera.x;
+            const platformExtend = width * SCENE2_RAMP_DRAW_EXTEND * revealEase;
+            const platformEndX = Math.min(flatX + platformExtend, SCENE2_ARCH_BRIDGE_START_X - camera.x);
+            appendRampEdgePath(ctx, SCENE2_RAMP_START_X, scene2Ramp.flatStartX);
+            ctx.lineTo(platformEndX, scene2Ramp.flatY);
+        } else {
+            appendRampEdgePath(ctx, SCENE2_RAMP_START_X, SCENE2_RAMP_START_X + width * SCENE2_RAMP_DRAW_EXTEND);
+        }
+        ctx.stroke();
+
+        if (scene2Ramp.flatUnlocked && revealEase > 0.01) {
+            const flatX = scene2Ramp.flatStartX - camera.x;
+            const platformExtend = width * SCENE2_RAMP_DRAW_EXTEND * revealEase;
+            const platformEndX = Math.min(flatX + platformExtend, SCENE2_ARCH_BRIDGE_START_X - camera.x);
+            ctx.strokeStyle = "rgba(228,228,232,0.85)";
+            ctx.lineWidth = 1.35;
+            ctx.beginPath();
+            ctx.moveTo(flatX, scene2Ramp.flatY);
+            ctx.lineTo(platformEndX, scene2Ramp.flatY);
+            ctx.stroke();
+        }
+    }
+    drawArchBridge();
+    drawSnowAndFlowers();
+    drawFloatingShards(false);
+
+    const pts2 = getTerrainPoints();
+    const terrainBaseY = height - groundH;
+    const seamFixY = terrainBaseY + 2;
+    ctx.beginPath(); ctx.moveTo(pts2.start-camera.x, terrainBaseY); ctx.lineTo(pts2.peak-camera.x, terrainBaseY-pts2.h); ctx.lineTo(pts2.end-camera.x, terrainBaseY); ctx.fill();
+    const mH = terrainParams.midHill; ctx.beginPath(); ctx.moveTo(mH.x-camera.x, seamFixY); ctx.lineTo(mH.x+mH.w*0.5-camera.x, terrainBaseY-mH.h); ctx.lineTo(mH.x+mH.w-camera.x, seamFixY); ctx.fill();
+    const b3 = terrainParams; ctx.beginPath(); ctx.moveTo(b3.bX3-camera.x, height-groundH); ctx.lineTo(b3.bX3+b3.peakOffset3-camera.x, height-groundH-b3.h3); ctx.lineTo(b3.bX3+b3.w3-camera.x, height-groundH); ctx.fill();
+    const pts4 = getTerrain4Points(); ctx.beginPath(); ctx.moveTo(pts4.start-camera.x, height-groundH); ctx.lineTo(pts4.peak-camera.x, height-groundH-pts4.h); ctx.lineTo(pts4.end-camera.x, height-groundH); ctx.fill();
+
+    if (isImageReady(images.building02)) ctx.drawImage(images.building02, terrainParams.b2ImageX - camera.x, height - groundH - height * 1.6 + 45, height * 1.6 * (images.building02.width / images.building02.height), height * 1.6);
+    if (isImageReady(images.building03)) ctx.drawImage(images.building03, b3.bX3-camera.x, height-groundH-b3.h3*2.2+38, b3.h3*2.2*(images.building03.width/images.building03.height), b3.h3*2.2);
+    
+    vegetation.filter(v => !v.isForeground).forEach(drawOrganicBranch);
+    drawBirdSwarm();
+
+    // ✨ 交互粒子 1 & 2
+    if (!specialOrb.finalized) { ctx.fillStyle = "#fff"; ctx.shadowBlur = 15; ctx.shadowColor = "#fff"; ctx.beginPath(); ctx.arc(6200-camera.x, height-groundH-pts2.h-50, 6+Math.sin(Date.now()*0.005)*3, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; }
+    if (!specialOrb2.finalized) { ctx.fillStyle = "#fff"; ctx.shadowBlur = 20; ctx.shadowColor = "#fff"; ctx.beginPath(); ctx.arc(specialOrb2.x-camera.x, specialOrb2.y, 8+Math.sin(Date.now()*0.006)*4, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; }
+    if (!debrisOrb.finalized) {
+        const orbSize = 9 + Math.sin(debrisOrb.pulse) * 2.4;
+        ctx.fillStyle = "#ffe9ef";
+        ctx.shadowBlur = 24;
+        ctx.shadowColor = "#ffd6e2";
+        ctx.beginPath();
+        ctx.arc(debrisOrb.x - camera.x, debrisOrb.y, orbSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+    if (!platformTopOrb.finalized && scene2Ramp.flatUnlocked) {
+        const orbSize = 8 + Math.sin(platformTopOrb.pulse) * 2.1;
+        ctx.fillStyle = "#ff5f74";
+        ctx.shadowBlur = 22;
+        ctx.shadowColor = "#ff5f74";
+        ctx.beginPath();
+        ctx.arc(platformTopOrb.x - camera.x, platformTopOrb.y, orbSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+
+    ringParticles.forEach(p => { ctx.globalAlpha = p.alpha; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x-camera.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1.0;
+
+    if (isImageReady(images.building04)) { const bH4 = pts4.h * 2.3; ctx.drawImage(images.building04, terrainParams.bX4 - 400 - camera.x, height - groundH - bH4 + 50, bH4 * (images.building04.width/images.building04.height), bH4); }
+
+    const pImgs = images[player.state];
+    if (pImgs && pImgs[player.frame] && isImageReady(pImgs[player.frame])) {
+        const curImg = pImgs[player.frame], px = player.x-camera.x+player.width/2, py = player.y+player.height/2;
+        ctx.save(); ctx.translate(px, py); ctx.rotate(player.rotation); ctx.scale(player.facing, 1); ctx.drawImage(curImg, -player.width/2, -player.height/2, player.width, player.height); ctx.restore();
+    }
+    drawRampTurnpointColumnsFront();
+    drawFloatingShards(true);
+
+    // ✨ 绘制身后跟随的粒子及其白线拖尾
+    player.followingParticles.forEach((p, i) => {
+        const pulse = Date.now() * 0.004 + (p.seed || i);
+        const allWhite = player.followingParticles.length >= 4;
+        const coreHue = 358 + Math.sin(pulse) * 6; // red range
+        // 拖尾线
+        if(p.trail.length > 2) {
+            for (let j = 0; j < p.trail.length - 1; j++) {
+                const aPt = p.trail[j];
+                const bPt = p.trail[j + 1];
+                const tSeg = j / (p.trail.length - 1); // 0:靠近粒子本体, 1:尾端
+                const segAlpha = (0.62 - tSeg * 0.5) * (0.8 + 0.2 * Math.sin(pulse * 0.9));
+                const segWidth = 1.2 - tSeg * 0.95; // 尾端逐渐变细
+                if (segWidth <= 0.08 || segAlpha <= 0.02) continue;
+                ctx.beginPath();
+                ctx.moveTo(aPt.x - camera.x, aPt.y);
+                ctx.lineTo(bPt.x - camera.x, bPt.y);
+                ctx.strokeStyle = allWhite
+                    ? `rgba(255,255,255,${segAlpha})`
+                    : `hsla(${coreHue}, 96%, 68%, ${segAlpha})`;
+                ctx.lineWidth = segWidth;
+                ctx.shadowBlur = 8 * (1 - tSeg);
+                ctx.shadowColor = allWhite
+                    ? "rgba(255,255,255,0.9)"
+                    : `hsla(${coreHue}, 98%, 56%, 0.9)`;
+                ctx.stroke();
+            }
+            ctx.shadowBlur = 0;
+        }
+        // 粒子核心
+        const px = p.x - camera.x;
+        const py = p.y;
+        ctx.fillStyle = allWhite ? "rgba(255,255,255,0.98)" : `hsla(${coreHue}, 98%, 70%, 0.98)`;
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = allWhite ? "rgba(255,255,255,0.98)" : `hsla(${coreHue}, 98%, 56%, 0.98)`;
+        ctx.beginPath(); ctx.arc(px, py, 4.2, 0, Math.PI*2); ctx.fill();
+        // 红色能量外环
+        ctx.strokeStyle = allWhite ? "rgba(255,255,255,0.62)" : `hsla(${coreHue + 8}, 98%, 66%, 0.62)`;
+        ctx.lineWidth = 0.9;
+        ctx.beginPath(); ctx.arc(px, py, 6.8 + Math.sin(pulse * 1.6) * 0.9, 0, Math.PI*2); ctx.stroke();
+        ctx.shadowBlur = 0;
+    });
+
+    vegetation.filter(v => v.isForeground).forEach(drawOrganicBranch);
+    drawMountainTrees(mountainTreesNear, 0.82);
+    
+    // ✨ 前景武器渲染
+    weapons.filter(w => w.depth <= 0.3).forEach(drawWeapon);
+
+    if (transition.scene2Blend < 0.01) {
+        stones.sort((a,b)=>b.depth-a.depth).forEach(rock => {
+            const rx = rock.x-camera.x, ry = getGroundHeight(rock.x, 9999); if(rx<-300||rx>width+300) return;
+            const base = Math.round(25 + rock.depth * 105);
+            ctx.save(); ctx.translate(rx, ry); ctx.scale(rock.scale, rock.scale); ctx.fillStyle = `rgb(${base},${base},${base})`;
+            ctx.beginPath(); ctx.moveTo(rock.points[0].x, rock.points[0].y); rock.points.forEach(p=>ctx.lineTo(p.x,p.y)); ctx.fill(); ctx.restore();
+        });
+    }
+    if (isImageReady(images.ruinsDebris)) { const rdH = 600; ctx.drawImage(images.ruinsDebris, terrainParams.bX5 - camera.x, getGroundHeight(terrainParams.bX5, 9999) - rdH + 10, rdH * (images.ruinsDebris.width / images.ruinsDebris.height), rdH); }
+    if (isImageReady(images.hand)) { const hh = height*0.45; ctx.drawImage(images.hand, 1500-camera.x, height-groundH-hh+10, hh*(images.hand.width/images.hand.height), hh); }
+    ctx.restore();
+    drawWindDebugHUD();
+}
+
+loadImages();
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1f0b0c;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+#game {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#hud {
+  position: fixed;
+  top: 12px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #ffe8e8;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 10;
+}
+
+#title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+#hint {
+  margin-top: 6px;
+  font-size: 14px;
+  opacity: 0.92;
+}
