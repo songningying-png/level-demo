@@ -74,14 +74,21 @@
 
     <div id="pause-screen" class="screen-overlay">
         <h2 style="font-weight: 100; letter-spacing: 5px; margin-bottom: 40px;">旅途小憩</h2>
-        <button class="btn" onclick="togglePause()">继续游戏</button>
-        <button class="btn" onclick="jumpTo(100)">重回起点</button>
-        <button class="btn" onclick="jumpTo(6000)">第一个高地</button>
-        <button class="btn" onclick="jumpTo(15250)">集成建筑03</button>
-        <button class="btn" onclick="jumpTo(28500, true)">通天梯</button>
-        <button class="btn" onclick="jumpToScene2()">第二关</button>
-        <button class="btn" onclick="jumpToRampTopRomanColumn()">三角斜坡顶部平台罗马柱</button>
-        <button class="btn" onclick="restartGame()">重新开始</button>
+        <div style="display:flex; flex-direction:column; gap:10px; align-items:center; width:min(980px, 92vw);">
+            <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
+                <button class="btn" onclick="togglePause()">继续游戏</button>
+                <button class="btn" onclick="jumpTo(100)">重回起点</button>
+                <button class="btn" onclick="jumpTo(6000)">第一个高地</button>
+                <button class="btn" onclick="jumpTo(15250)">集成建筑03</button>
+                <button class="btn" onclick="jumpTo(28500, true)">通天梯</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
+                <button class="btn" onclick="jumpToScene2()">第二关</button>
+                <button class="btn" onclick="jumpToBrokenBridgeZone()">断桥坐标</button>
+                <button class="btn" onclick="jumpToRampTopRomanColumn()">三角斜坡顶部平台罗马柱</button>
+                <button class="btn" onclick="restartGame()">重新开始</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -102,6 +109,12 @@ const assets = {
     ruinsDebris: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_ruins_debris01.png',
     mtn01: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_mountain01_mid.png',
     mtn02: gitBase + 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_mountain02_mid.png',
+    s2_column_01: 'Assets/scene2/s2_column_01.png',
+    s2_column_02: 'Assets/scene2/s2_column_02.png',
+    s2_column_03: 'Assets/scene2/s2_column_03.png',
+    s2_ruin_mid_01: 'Assets/scene2/s2_ruin_mid_01.png',
+    s2_ruin_mid_02: 'Assets/scene2/s2_ruin_mid_02.png',
+    s2_sym_building_01: 'Assets/scene2/s2_sym_building_01.png',
     run: [1,2,3,4,5,6].map(i => gitBase + `Assets/Sprites/Player/juese_paob_0${i}.png`),
     idle: [1,2,3].map(i => gitBase + `Assets/Sprites/Player/juese_sanshitu_0${i}.png`),
     jump: [1,2,3,4,5,6].map(i => gitBase + `Assets/Sprites/Player/juese_tiaoyue_0${i}.png`)
@@ -128,6 +141,14 @@ let skyCurtain = {
     active: false,
     startX: 0,
     startedAt: 0
+};
+let ambientWindBurst = {
+    active: false,
+    startedAt: 0,
+    durationMs: 6000,
+    intensity: 0,
+    triggerXs: [],
+    triggerIdx: 0
 };
 
 function createShader(gl, type, source) {
@@ -441,6 +462,7 @@ let platformTopOrb = { x: 0, y: 0, triggered: false, finalized: false, pulse: 0 
 let ringParticles = [];
 let expansionRings = []; 
 let holyRings = [];
+let rampTopShadowParticles = [];
 let poemData = { alpha: 0, show: false, state: 'idle', lines: [], timer: 0, isFirst: true };
 let giantBird = { x: 0, y: 0, active: false, alpha: 0, flap: 0 }; 
 let ambientStorm = []; 
@@ -461,8 +483,15 @@ let mountainTreesNear = [];
 let floatingShards = [];
 let rubbleDragonbonesMid = [];
 let farRectTriPeaks = [];
+let scene2ColumnsDeck = [];
+let scene2RuinsMid = [];
+let scene2PlatformDecorSpawned = false;
+let brokenBridgePlatforms = [];
+let zFloatingPlatforms = [];
+let zOrganicTrees = [];
+let lateStageCheckpoint = { x: 0, y: 0, valid: false };
 const SCENE2_RAMP_START_X = 32500;
-const SCENE2_RAMP_RUN_MS = 20000;
+const SCENE2_RAMP_RUN_MS = 10000;
 const SCENE2_CLIFF_START_X = 40000;
 const SCENE2_CLIFF_END_X = 40800;
 const SCENE2_ARCH_BRIDGE_START_X = 40600;
@@ -471,6 +500,11 @@ const SCENE2_ARCH_BRIDGE_END_X = SCENE2_ARCH_BRIDGE_START_X + SCENE2_ARCH_BRIDGE
 const SCENE2_ARCH_COUNT = 20;
 const SCENE2_ARCH_BRIDGE_HEIGHT = 8103;
 const SCENE2_ARCH_BRIDGE_DECK_THICKNESS = 20;
+const SCENE2_BROKEN_PLATFORM_START_X = 43000;
+const SCENE2_BROKEN_PLATFORM_END_X = 50000;
+const SCENE2_BROKEN_ENTRY_BUFFER_W = 220;
+const SCENE2_Z_FLOAT_START_X = 49500;
+const SCENE2_Z_FLOAT_TOTAL_HEIGHT_RATIO = 3.5;
 const SCENE2_CLIFF_FLOOR_DROP = 150; // 断崖坑底下沉幅度（保持可见，不掉出镜头）
 const SCENE2_SHARDS_SHOW_BLEND = 0.985; // 场景渐变接近完成后再显示悬浮碎石
 const SCENE2_SHARDS_REVEAL_MIN_MS = 900;
@@ -543,6 +577,285 @@ function getPlatformTopOrbWorldPos() {
     const x = scene2Ramp.flatUnlocked ? (scene2Ramp.flatStartX + 170) : (SCENE2_RAMP_START_X + 170);
     const yBase = scene2Ramp.flatUnlocked ? scene2Ramp.flatY : scene2RampEdgeY(x);
     return { x, y: yBase - 220 };
+}
+
+function ensureBrokenBridgePlatforms() {
+    if (brokenBridgePlatforms.length) return;
+    const deckY = getScene2ArchBridgeDeckY();
+    let x = SCENE2_BROKEN_PLATFORM_START_X;
+    let idx = 0;
+    while (x < SCENE2_BROKEN_PLATFORM_END_X - 180) {
+        const w = 220 + Math.random() * 220;
+        const gap = idx === 0 ? 0 : (140 + Math.random() * 120);
+        brokenBridgePlatforms.push({
+            x,
+            w,
+            y: deckY,
+            pierDepth: 120 + Math.random() * 180
+        });
+        x += w + gap;
+        idx++;
+    }
+}
+
+function getBrokenBridgePlatformY(worldX) {
+    for (let i = 0; i < brokenBridgePlatforms.length; i++) {
+        const p = brokenBridgePlatforms[i];
+        if (worldX >= p.x && worldX <= p.x + p.w) return p.y;
+    }
+    return null;
+}
+
+function ensureZFloatingPlatforms() {
+    if (zFloatingPlatforms.length) return;
+    const deckY = getScene2ArchBridgeDeckY();
+    const startY = deckY - 30;
+    const totalRise = Math.max(height * 2.8, height * SCENE2_Z_FLOAT_TOTAL_HEIGHT_RATIO);
+    const laneAmp = 180;
+    const laneStepX = 200;
+    const riseStep = 170;
+    const count = Math.ceil(totalRise / riseStep);
+    const baseX = SCENE2_Z_FLOAT_START_X + 40;
+
+    // 入场保底平台：确保 49500 附近可以直接起跳衔接到悬浮路线
+    const firstFloatX = SCENE2_BROKEN_PLATFORM_END_X + 22;
+    const firstFloatY = deckY - 132;
+    zFloatingPlatforms.push({
+        x: firstFloatX,
+        y: firstFloatY,
+        w: 360,
+        h: 120,
+        poly: [
+            { x: -170, y: 0 },
+            { x: -70, y: -8 },
+            { x: 88, y: -6 },
+            { x: 174, y: 2 },
+            { x: 132, y: 64 },
+            { x: 35, y: 110 },
+            { x: -46, y: 96 },
+            { x: -148, y: 58 }
+        ],
+        shards: [],
+        patchLines: [
+            { x0: -128, y0: 26, x1: 124, y1: 20 },
+            { x0: -90, y0: 52, x1: 104, y1: 60 },
+            { x0: -42, y0: 82, x1: 56, y1: 74 }
+        ],
+        t: 0
+    });
+    // 引导链：前几跳刻意做得可达，避免 50000 后第一段断档
+    const guidePlatforms = [
+        { x: firstFloatX + 170, y: firstFloatY - 88, w: 240, h: 108 },
+        { x: firstFloatX + 340, y: firstFloatY - 196, w: 228, h: 106 },
+        { x: firstFloatX + 520, y: firstFloatY - 314, w: 222, h: 102 },
+        { x: firstFloatX + 700, y: firstFloatY - 442, w: 214, h: 98 }
+    ];
+    guidePlatforms.forEach((gp, idx) => {
+        const hw = gp.w * 0.5;
+        zFloatingPlatforms.push({
+            x: gp.x,
+            y: gp.y,
+            w: gp.w,
+            h: gp.h,
+            poly: [
+                { x: -hw * 0.96, y: -2 },
+                { x: -hw * 0.36, y: -10 },
+                { x: hw * 0.24, y: -7 },
+                { x: hw * 0.94, y: 0 },
+                { x: hw * 0.52, y: gp.h * 0.44 },
+                { x: hw * 0.14, y: gp.h * (0.86 + idx * 0.02) },
+                { x: -hw * 0.22, y: gp.h * 0.72 },
+                { x: -hw * 0.56, y: gp.h * 0.4 }
+            ],
+            shards: [],
+            patchLines: [
+                { x0: -hw * 0.7, y0: gp.h * 0.26, x1: hw * 0.7, y1: gp.h * 0.22 },
+                { x0: -hw * 0.48, y0: gp.h * 0.56, x1: hw * 0.5, y1: gp.h * 0.62 }
+            ],
+            t: (idx + 1) * 0.05
+        });
+    });
+
+    for (let i = 0; i < count; i++) {
+        const t = i / Math.max(1, count - 1);
+        const dir = (i % 2 === 0) ? 1 : -1;
+        const w = 180 + Math.random() * 140;
+        const h = 96 + Math.random() * 68;
+        const x = baseX + i * laneStepX + dir * laneAmp;
+        const y = startY - i * riseStep - Math.sin(i * 0.45) * 20;
+        const halfW = w * 0.5;
+        const topNoiseL = -3 + Math.random() * 6;
+        const topNoiseR = -3 + Math.random() * 6;
+        const tipDepth = h * (0.95 + Math.random() * 0.28);
+        const poly = [
+            { x: -halfW * (0.92 + Math.random() * 0.1), y: topNoiseL },
+            { x: -halfW * 0.34, y: -6 - Math.random() * 8 },
+            { x: halfW * 0.26, y: -4 - Math.random() * 7 },
+            { x: halfW * (0.92 + Math.random() * 0.1), y: topNoiseR },
+            { x: halfW * 0.54, y: h * 0.42 + Math.random() * 16 },
+            { x: halfW * 0.16, y: tipDepth },
+            { x: -halfW * 0.2, y: h * 0.7 + Math.random() * 12 },
+            { x: -halfW * 0.58, y: h * 0.38 + Math.random() * 12 }
+        ];
+        const shards = [];
+        const shardCount = 2 + Math.floor(Math.random() * 2);
+        for (let s = 0; s < shardCount; s++) {
+            const sw = 12 + Math.random() * 18;
+            const sh = 10 + Math.random() * 16;
+            const sx = (Math.random() - 0.5) * (w * 0.92);
+            const sy = h * (0.5 + Math.random() * 0.6);
+            shards.push([
+                { x: sx - sw * (0.55 + Math.random() * 0.2), y: sy - sh * 0.3 },
+                { x: sx + sw * (0.48 + Math.random() * 0.2), y: sy - sh * (0.5 + Math.random() * 0.2) },
+                { x: sx + sw * 0.25, y: sy + sh * (0.6 + Math.random() * 0.3) },
+                { x: sx - sw * (0.42 + Math.random() * 0.2), y: sy + sh * (0.4 + Math.random() * 0.25) }
+            ]);
+        }
+        const patchLines = [];
+        const linesN = 4 + Math.floor(Math.random() * 4);
+        for (let k = 0; k < linesN; k++) {
+            const lx0 = -halfW * (0.72 - Math.random() * 0.35);
+            const lx1 = halfW * (0.72 - Math.random() * 0.35);
+            const ly = h * (0.1 + Math.random() * 0.62);
+            patchLines.push({
+                x0: lx0,
+                y0: ly,
+                x1: lx1,
+                y1: ly + (Math.random() - 0.5) * 16
+            });
+        }
+        zFloatingPlatforms.push({ x, y, w, h, poly, shards, patchLines, t });
+    }
+
+    zOrganicTrees = [];
+    zFloatingPlatforms.forEach((p) => {
+        if (Math.random() > 0.35) return;
+        zOrganicTrees.push({
+            x: p.x + (Math.random() - 0.5) * (p.w * 0.24),
+            y: p.y,
+            h: 120 + Math.random() * 110,
+            bend: (Math.random() > 0.5 ? 1 : -1) * (0.45 + Math.random() * 0.4),
+            unfold: 0,
+            seed: Math.random() * Math.PI * 2,
+            tone: 0.75 + Math.random() * 0.2
+        });
+    });
+}
+
+function getZFloatingEntryCheckpoint() {
+    if (zFloatingPlatforms.length) {
+        const p = zFloatingPlatforms[0];
+        return { x: p.x, y: p.y - player.height };
+    }
+    const gy = getScene2ArchBridgeDeckY();
+    return { x: SCENE2_BROKEN_PLATFORM_END_X + 22, y: gy - 132 - player.height };
+}
+
+function getZFloatingPlatformY(worldX) {
+    for (let i = 0; i < zFloatingPlatforms.length; i++) {
+        const p = zFloatingPlatforms[i];
+        if (worldX >= p.x - p.w * 0.5 && worldX <= p.x + p.w * 0.5) {
+            return p.y;
+        }
+    }
+    return null;
+}
+
+function updateZOrganicTrees() {
+    if (!zOrganicTrees.length) return;
+    zOrganicTrees.forEach((t) => {
+        const dx = Math.abs(player.x - t.x);
+        const dy = Math.abs((player.y + player.height * 0.5) - (t.y - t.h * 0.45));
+        const near = dx < 360 && dy < 320;
+        if (near) t.unfold = Math.min(1, t.unfold + 0.05);
+        else t.unfold = Math.max(0, t.unfold - 0.02);
+    });
+}
+
+function ensureScene2PlatformDecor() {
+    if (scene2PlatformDecorSpawned || !scene2Ramp.flatUnlocked) return;
+    scene2PlatformDecorSpawned = true;
+    scene2ColumnsDeck = [];
+    scene2RuinsMid = [];
+
+    const platformStart = scene2Ramp.flatStartX + 120;
+    const platformEnd = SCENE2_ARCH_BRIDGE_START_X - 220;
+    const bridgeStart = SCENE2_ARCH_BRIDGE_START_X + 220;
+    const bridgeEnd = SCENE2_ARCH_BRIDGE_END_X - 220;
+    const colKeys = ['s2_column_01', 's2_column_02', 's2_column_03'];
+    const ruinKeys = ['s2_ruin_mid_01', 's2_ruin_mid_02'];
+
+    const isFarFromExisting = (arr, x, gap) => arr.every(it => Math.abs(it.x - x) >= gap);
+
+    // 罗马柱：平台更密、桥面更疏，排除地面区（x 明确限定）
+    for (let i = 0; i < 5; i++) {
+        const x = platformStart + Math.random() * Math.max(40, platformEnd - platformStart);
+        if (!isFarFromExisting(scene2ColumnsDeck, x, 210)) continue;
+        scene2ColumnsDeck.push({ x, imgKey: colKeys[i % colKeys.length], scale: 0.72 + Math.random() * 0.2 });
+    }
+    for (let i = 0; i < 3; i++) {
+        const x = bridgeStart + Math.random() * Math.max(40, bridgeEnd - bridgeStart);
+        if (!isFarFromExisting(scene2ColumnsDeck, x, 260)) continue;
+        scene2ColumnsDeck.push({ x, imgKey: colKeys[(i + 1) % colKeys.length], scale: 0.68 + Math.random() * 0.18 });
+    }
+
+    // 中景废墟：仅平台中景层，不压前景；并避让罗马柱
+    for (let i = 0; i < 6; i++) {
+        const x = platformStart + Math.random() * Math.max(40, platformEnd - platformStart);
+        if (!isFarFromExisting(scene2ColumnsDeck, x, 220)) continue;
+        if (!isFarFromExisting(scene2RuinsMid, x, 170)) continue;
+        scene2RuinsMid.push({ x, imgKey: ruinKeys[i % ruinKeys.length], scale: 0.74 + Math.random() * 0.16 });
+    }
+
+    // 6s 大风随机触发点：平台+桥面
+    ambientWindBurst.triggerXs = [];
+    ambientWindBurst.triggerIdx = 0;
+    const pushTx = (x) => ambientWindBurst.triggerXs.push(Math.max(platformStart + 60, x));
+    pushTx(platformStart + 320 + Math.random() * 420);
+    pushTx(platformEnd - 260 + Math.random() * 220);
+    pushTx(bridgeStart + 520 + Math.random() * 520);
+    pushTx(bridgeStart + (bridgeEnd - bridgeStart) * (0.45 + Math.random() * 0.2));
+    pushTx(bridgeEnd - 620 + Math.random() * 420);
+    ambientWindBurst.triggerXs.sort((a, b) => a - b);
+}
+
+function updateAmbientWindBurst(now) {
+    if (!scene2Ramp.flatUnlocked || !windTransition.done) return;
+    if (!ambientWindBurst.active) {
+        if (ambientWindBurst.triggerIdx >= ambientWindBurst.triggerXs.length) return;
+        const tx = ambientWindBurst.triggerXs[ambientWindBurst.triggerIdx];
+        if (player.x >= tx - 10) {
+            ambientWindBurst.active = true;
+            ambientWindBurst.startedAt = now;
+            if (ensureWindVideoOverlay() && windVideo.el) {
+                windVideo.el.currentTime = 0;
+                windVideo.el.loop = false;
+                windVideo.el.playbackRate = 1;
+                if (Number.isFinite(windVideo.el.duration) && windVideo.el.duration > 0.01) {
+                    windVideo.el.playbackRate = Math.max(0.25, Math.min(4, windVideo.el.duration / 6));
+                }
+                const pp = windVideo.el.play();
+                if (pp && typeof pp.catch === 'function') pp.catch(() => {});
+            }
+        }
+        return;
+    }
+
+    const dt = now - ambientWindBurst.startedAt;
+    const p = Math.max(0, Math.min(1, dt / ambientWindBurst.durationMs));
+    const wave = Math.sin(p * Math.PI);
+    ambientWindBurst.intensity = 42 + 52 * wave;
+    if (windVideo.el) {
+        const targetA = 0.08 + 0.26 * wave;
+        windVideo.opacity += (targetA - windVideo.opacity) * 0.18;
+        windVideo.el.style.opacity = `${Math.max(0, Math.min(0.38, windVideo.opacity))}`;
+    }
+    if (dt >= ambientWindBurst.durationMs) {
+        ambientWindBurst.active = false;
+        ambientWindBurst.intensity = 0;
+        ambientWindBurst.triggerIdx++;
+        destroyWindVideoOverlay();
+    }
 }
 /** 第二关视觉强度：仅 0 或 1（由虚空落地瞬间切满，不再做爆炸渐变） */
 let transition = { scene2Blend: 0, shake: 0 };
@@ -626,7 +939,7 @@ let loadedCount = 0;
 function isImageReady(img) { return img && img.complete && img.naturalWidth !== 0; }
 
 function loadImages() {
-    ['bg', 'bg1', 'vista', 'hand', 'building02', 'building03', 'building04', 'ruinsDebris', 'mtn01', 'mtn02'].forEach(key => {
+    ['bg', 'bg1', 'vista', 'hand', 'building02', 'building03', 'building04', 'ruinsDebris', 'mtn01', 'mtn02', 's2_column_01', 's2_column_02', 's2_column_03', 's2_ruin_mid_01', 's2_ruin_mid_02', 's2_sym_building_01'].forEach(key => {
         images[key] = new Image(); images[key].src = assets[key];
         images[key].onload = () => loadedCount++;
     });
@@ -656,11 +969,45 @@ function getTerrain4Points() {
 
 function getGroundHeight(worldX, currentY) {
     const baseGround = height - groundH;
+    // 50000 衔接托底：断桥末端到悬浮区起点稳定过渡
+    if (worldX >= 49400 && worldX <= 50200) {
+        return getScene2ArchBridgeDeckY();
+    }
+    // 43000 衔接段仅保留窄托底，避免破坏断桥自然跳跃节奏
+    if (worldX >= 42980 && worldX <= 43020) {
+        return getScene2ArchBridgeDeckY();
+    }
+    // 50000 衔接托底：确保起跳过渡区不会判空
+    if (worldX >= 49400 && worldX <= 50100) {
+        return getScene2ArchBridgeDeckY();
+    }
+    // 50000 后启用 Z 字悬浮平台碰撞
+    if (worldX >= SCENE2_Z_FLOAT_START_X) {
+        const gy = getZFloatingPlatformY(worldX);
+        if (gy != null) return gy;
+        return height + 3000;
+    }
+    if (worldX >= SCENE2_BROKEN_PLATFORM_START_X && worldX < SCENE2_BROKEN_PLATFORM_END_X) {
+        // 冗余保险：仅在 43000 极窄衔接点保底
+        if (worldX >= 42980 && worldX <= 43020) {
+            return getScene2ArchBridgeDeckY();
+        }
+        const gy = getBrokenBridgePlatformY(worldX);
+        // 断桥起点物理缓冲：避免 43000 边界起跳时单帧踩空
+        if (gy == null && worldX <= SCENE2_BROKEN_PLATFORM_START_X + SCENE2_BROKEN_ENTRY_BUFFER_W) {
+            return getScene2ArchBridgeDeckY();
+        }
+        // 断桥末端衔接保护：避免 50000 前后边界落到 height + 2400
+        if (gy == null && worldX >= SCENE2_BROKEN_PLATFORM_END_X - 240) {
+            return getScene2ArchBridgeDeckY();
+        }
+        return gy == null ? (height + 2400) : gy;
+    }
     if (worldX >= SCENE2_ARCH_BRIDGE_START_X && worldX <= SCENE2_ARCH_BRIDGE_END_X) {
         // 桥面顶部是实心水平矩形碰撞体
         return getScene2ArchBridgeDeckY();
     }
-    if (worldX >= SCENE2_RAMP_START_X) {
+    if (worldX >= SCENE2_RAMP_START_X && worldX < SCENE2_BROKEN_PLATFORM_START_X) {
         if (scene2Ramp.flatUnlocked && worldX >= scene2Ramp.flatStartX) {
             return scene2Ramp.flatY;
         }
@@ -712,14 +1059,27 @@ function getGroundHeight(worldX, currentY) {
  * 脚底 ShapeCast：在脚部宽度上多点采样，取最高地面（最早接触）。
  */
 function shapeCastGroundAtFeet(worldX, bodyTopY, footWorldY, halfFootW) {
-    const hw = Math.max(2, halfFootW ||0);
-    const xs = [worldX - hw, worldX, worldX + hw];
-    let maxG = -1e9;
+    const hw = Math.max(2, halfFootW || 0);
+    const xs = [
+        worldX - hw,
+        worldX - hw * 0.66,
+        worldX - hw * 0.33,
+        worldX,
+        worldX + hw * 0.33,
+        worldX + hw * 0.66,
+        worldX + hw
+    ];
+    let highestG = Number.POSITIVE_INFINITY;
+    let hasValid = false;
     for (let i = 0; i < xs.length; i++) {
         const g = getGroundHeight(xs[i], bodyTopY);
-        maxG = Math.max(maxG, g);
+        // 深渊高度忽略，避免边缘一只脚采到“空洞”时把整个人拉下去
+        if (Number.isFinite(g) && g < height + 1000) {
+            highestG = Math.min(highestG, g);
+            hasValid = true;
+        }
     }
-    return maxG;
+    return hasValid ? highestG : (height + 5200);
 }
 
 /** Unity 风格 SmoothDamp 标量（Y 轴镜头） */
@@ -755,6 +1115,11 @@ function initWindTransitionMarker() {
     windTransition.touchedStairTop = false;
     windTransition.armedAfterDrop = false;
     windTransition.done = false;
+    ambientWindBurst.active = false;
+    ambientWindBurst.startedAt = 0;
+    ambientWindBurst.intensity = 0;
+    ambientWindBurst.triggerXs = [];
+    ambientWindBurst.triggerIdx = 0;
     skyCurtain.active = false;
     skyCurtain.startX = 0;
     skyCurtain.startedAt = 0;
@@ -999,10 +1364,18 @@ function drawLandingDustWorld() {
 function initDecorations() {
     ambientStorm = []; stones = []; ringParticles = []; vegetation = []; romanColumns = []; 
     birdsSwarm = []; mtn01Instances = []; mtn02Instances = []; skyStairs = []; expansionRings = []; holyRings = [];
+    rampTopShadowParticles = [];
     whiteBirds = []; snowPiles = []; redFlowers = []; watercolorBlobs = []; mountainTreesFar = []; mountainTreesNear = [];
     floatingShards = [];
     rubbleDragonbonesMid = [];
     farRectTriPeaks = [];
+    scene2ColumnsDeck = [];
+    scene2RuinsMid = [];
+    scene2PlatformDecorSpawned = false;
+    brokenBridgePlatforms = [];
+    zFloatingPlatforms = [];
+    zOrganicTrees = [];
+    lateStageCheckpoint = { x: 0, y: 0, valid: false };
     scene2Ramp.started = false;
     scene2Ramp.startAt = 0;
     scene2Ramp.climbAccumMs = 0;
@@ -1275,7 +1648,8 @@ function alignCameraInstant() {
     const inB3 = player.x > terrainParams.bX3 - 100 && player.x < terrainParams.bX3 + terrainParams.w3 + 400;
     const inB4 = player.x > pts4.start - 100 && player.x < pts4.end + 600;
     const zoom = (inB1 || inB3 || inB4) ? 0.42 : 1.0;
-    const camY = (zoom < 1.0) ? 0 : (-vertOffset);
+    let camY = (zoom < 1.0) ? 0 : (-vertOffset);
+    camY = Math.max(-4200, Math.min(4200, camY));
 
     camera.targetZoom = zoom;
     camera.zoom = zoom;
@@ -1357,7 +1731,13 @@ function syncProgressForJump(targetX) {
 function jumpTo(targetX, preferStair = false) {
     if (gameState === 'MENU') return;
 
-    let landingY = getGroundHeight(targetX, Number.POSITIVE_INFINITY) - player.height;
+    let groundY = getGroundHeight(targetX, Number.POSITIVE_INFINITY);
+    const safeBaseGround = height - groundH;
+    // 兜底：防止跳转到深渊/异常高度导致镜头白屏
+    if (!Number.isFinite(groundY) || groundY > height + 1200 || groundY < -height * 4) {
+        groundY = safeBaseGround;
+    }
+    let landingY = groundY - player.height;
     if (preferStair && skyStairs.length > 0) {
         let nearest = null;
         let bestDist = Number.POSITIVE_INFINITY;
@@ -1402,13 +1782,57 @@ function jumpToScene2() {
     destroyWindVideoOverlay();
 }
 
+function jumpToBrokenBridgeZone() {
+    // 安全跳到断桥首段，避免落在衔接缝隙
+    // 先保证斜坡平台高度状态有效，避免断桥参考高度异常
+    const safeFlatStartX = SCENE2_RAMP_START_X + 360;
+    scene2Ramp.started = true;
+    scene2Ramp.flatUnlocked = true;
+    scene2Ramp.flatStartX = safeFlatStartX;
+    const rawFlatY = scene2RampEdgeY(safeFlatStartX);
+    const minSafeY = height * 0.24;
+    const maxSafeY = height - groundH - 26;
+    scene2Ramp.flatY = Math.max(minSafeY, Math.min(maxSafeY, rawFlatY));
+    scene2Ramp.unlockedAt = performance.now() - SCENE2_PLATFORM_REVEAL_MS;
+
+    ensureBrokenBridgePlatforms();
+    let targetX = SCENE2_BROKEN_PLATFORM_START_X + 12;
+    let forceLandingY = null;
+    if (brokenBridgePlatforms.length > 0) {
+        const p = brokenBridgePlatforms[0];
+        // 落到首块断桥偏左安全区，避免落在边缘或后续缝隙
+        targetX = p.x + Math.max(36, Math.min(140, p.w * 0.28));
+        forceLandingY = p.y - player.height;
+    }
+    jumpTo(targetX, false);
+    if (forceLandingY != null) {
+        player.y = forceLandingY;
+        player.grounded = true;
+        player.vy = 0;
+        alignCameraInstant();
+    }
+    transition.scene2Blend = 1;
+    windTransition.phase = 'done';
+    windTransition.done = true;
+    windTransition.intensity = 0;
+    destroyWindVideoOverlay();
+    lateStageCheckpoint.x = player.x;
+    lateStageCheckpoint.y = player.y;
+    lateStageCheckpoint.valid = true;
+}
+
 function jumpToRampTopRomanColumn() {
     // 跳到三角斜坡顶部平台罗马柱区域
     const targetX = 39147;
+    // 关键：不要用 targetX 直接反推 flatY（会让斜坡公式在远距离下得到极端负值，导致整屏白）
+    const safeFlatStartX = SCENE2_RAMP_START_X + 360;
     scene2Ramp.started = true;
     scene2Ramp.flatUnlocked = true;
-    scene2Ramp.flatStartX = targetX - 170;
-    scene2Ramp.flatY = scene2RampEdgeY(scene2Ramp.flatStartX);
+    scene2Ramp.flatStartX = safeFlatStartX;
+    const rawFlatY = scene2RampEdgeY(safeFlatStartX);
+    const minSafeY = height * 0.24;
+    const maxSafeY = height - groundH - 26;
+    scene2Ramp.flatY = Math.max(minSafeY, Math.min(maxSafeY, rawFlatY));
     scene2Ramp.unlockedAt = performance.now() - SCENE2_PLATFORM_REVEAL_MS;
     jumpTo(targetX, false);
     transition.scene2Blend = 1;
@@ -1477,7 +1901,8 @@ function update() {
             // 只统计“持续向前爬坡”的时间：中途停下不计时
             const dtMs = Math.max(0, rampNow - (scene2Ramp.lastTick || rampNow));
             const dx = player.x - (scene2Ramp.lastX || player.x);
-            const climbingForward = dx > 0.04 && player.vx > 0.08;
+            const inputForward = !!(keys['ArrowRight'] || keys['KeyD']);
+            const climbingForward = dx > 0.015 && (inputForward || player.vx > 0.02);
             if (climbingForward) scene2Ramp.climbAccumMs += dtMs;
             scene2Ramp.lastTick = rampNow;
             scene2Ramp.lastX = player.x;
@@ -1491,9 +1916,24 @@ function update() {
             }
         }
     }
+    ensureScene2PlatformDecor();
+    if (transition.scene2Blend > 0.01 || player.x >= SCENE2_BROKEN_PLATFORM_START_X - 800) {
+        ensureBrokenBridgePlatforms();
+    }
+    if (transition.scene2Blend > 0.01 || player.x >= SCENE2_Z_FLOAT_START_X - 900) {
+        ensureZFloatingPlatforms();
+    }
+    if (player.x >= SCENE2_Z_FLOAT_START_X - 60 && (!lateStageCheckpoint.valid || lateStageCheckpoint.x < SCENE2_Z_FLOAT_START_X - 20)) {
+        const zEntry = getZFloatingEntryCheckpoint();
+        lateStageCheckpoint.x = zEntry.x;
+        lateStageCheckpoint.y = zEntry.y;
+        lateStageCheckpoint.valid = true;
+    }
+    updateZOrganicTrees();
 
     tryStartWindTransition();
     updateWindTransition();
+    updateAmbientWindBurst(performance.now());
 
     updateLandingFxDust();
 
@@ -1515,9 +1955,10 @@ function update() {
     const jumpDown = !!(keys['Space'] || keys['ArrowUp'] || keys['KeyW']);
     const jumpPressed = jumpDown && !jumpPressedLast;
     jumpPressedLast = jumpDown;
+    const ambientSlowMul = ambientWindBurst.active ? 0.52 : 1;
     if (!player.inputLocked && !inVoidFall) {
-        if (keys['ArrowRight'] || keys['KeyD']) { player.vx += player.accel; player.facing = 1; moving = true; }
-        if (keys['ArrowLeft'] || keys['KeyA']) { player.vx -= player.accel; player.facing = -1; moving = true; }
+        if (keys['ArrowRight'] || keys['KeyD']) { player.vx += player.accel * ambientSlowMul; player.facing = 1; moving = true; }
+        if (keys['ArrowLeft'] || keys['KeyA']) { player.vx -= player.accel * ambientSlowMul; player.facing = -1; moving = true; }
         if (jumpPressed && player.jumpCount < player.maxJumps) {
             player.vy = player.jumpForce;
             player.grounded = false;
@@ -1617,7 +2058,16 @@ function update() {
         player.vx *= friction; player.vy += gravity; player.x += player.vx; player.y += player.vy;
         tryStartVoidFall(topStair);
         if (voidFall.phase !== 'falling') {
-            const currentGround = getGroundHeight(player.x, player.y);
+            // 断桥/悬浮平台区域使用脚底多点采样，避免在平台边缘单点判定坠落
+            const inLateSceneDanger = player.x >= SCENE2_BROKEN_PLATFORM_START_X - 120;
+            const currentGround = inLateSceneDanger
+                ? shapeCastGroundAtFeet(
+                    player.x + player.vx * 0.1,
+                    player.y,
+                    player.y + player.height,
+                    player.width * 0.36
+                )
+                : getGroundHeight(player.x, player.y);
             if (player.y + player.height > currentGround) {
                 player.y = currentGround - player.height;
                 player.vy = 0; player.grounded = true;
@@ -1627,14 +2077,62 @@ function update() {
         }
     }
 
-    if (player.grounded) player.jumpCount = 0;
+    if (player.grounded) {
+        player.jumpCount = 0;
+        // 后段关卡记录最近安全站立点：踩空后可立即回退
+        if (player.x >= SCENE2_BROKEN_PLATFORM_START_X - 120) {
+            lateStageCheckpoint.x = player.x;
+            lateStageCheckpoint.y = player.y;
+            lateStageCheckpoint.valid = true;
+        }
+    }
+
+    // 新逻辑：后段踩空后不持续下坠，直接回退到上一个安全坐标
+    const inLateStage = player.x >= SCENE2_BROKEN_PLATFORM_START_X + 220;
+    const inZFloatStage = player.x >= SCENE2_Z_FLOAT_START_X - 80;
+    if (!inVoidFall && inLateStage && lateStageCheckpoint.valid && !player.grounded && player.vy > 0) {
+        // 只有当人物真正掉到屏幕底部以下，且处于垂直下落状态时才回溯
+        const isBelowScreen = player.y > height + 100;
+        const isWayBelowPlatform = player.y > (lateStageCheckpoint.y + 600); // 增加容错高度到600
+        if (isBelowScreen || isWayBelowPlatform) {
+            for (let i = 0; i < 16; i++) {
+                ringParticles.push({
+                    x: player.x + player.width * 0.5 + (Math.random() - 0.5) * 26,
+                    y: player.y + player.height * 0.52 + (Math.random() - 0.5) * 18,
+                    vx: (Math.random() - 0.5) * 1.6,
+                    vy: -0.9 - Math.random() * 1.5,
+                    alpha: 0.7,
+                    size: 1.5 + Math.random() * 2.1
+                });
+            }
+            player.x = lateStageCheckpoint.x;
+            player.y = lateStageCheckpoint.y;
+            player.vx = 0;
+            player.vy = 0;
+            player.grounded = true;
+            player.inputLocked = false;
+            player.state = 'idle';
+            if (inZFloatStage) {
+                const zCamY = -(player.y - height * 0.65);
+                camera.targetY = zCamY;
+                camera.y = zCamY;
+            } else {
+                alignCameraInstant();
+            }
+        }
+    }
     if (windTransition.phase !== 'idle' && !windTransition.done && !inVoidFall) {
         player.vx *= 0.72;
         player.facing = 1;
     }
+    if (ambientWindBurst.active && !inVoidFall) {
+        player.vx *= 0.92;
+    }
 
-    const windN = Math.max(0, Math.min(1, windTransition.intensity / 100));
-    const windActive = windTransition.phase !== 'idle' && !windTransition.done;
+    const transWindN = Math.max(0, Math.min(1, windTransition.intensity / 100));
+    const burstWindN = Math.max(0, Math.min(1, ambientWindBurst.intensity / 100));
+    const windN = Math.max(transWindN, burstWindN);
+    const windActive = (windTransition.phase !== 'idle' && !windTransition.done) || ambientWindBurst.active;
     const gust = windActive ? 0.72 + 0.28 * Math.sin(performance.now() * 0.0018 + camera.x * 0.00015) : 1;
     const windDir = -1;
 
@@ -1703,31 +2201,67 @@ function update() {
     if (anim && anim.length > 0) player.frame = Math.floor(player.frameTimer) % anim.length;
 
     if (!inVoidFall) {
-        const rampCamBlendStart = SCENE2_RAMP_START_X - 360;
-        const rampCamBlendEnd = SCENE2_RAMP_START_X + 520;
-        const rampT = Math.max(0, Math.min(1, (player.x - rampCamBlendStart) / (rampCamBlendEnd - rampCamBlendStart)));
-        const rampEase = easeInOut01(rampT);
-        const camAnchor = 0.2 + (SCENE2_RAMP_CAMERA_ANCHOR - 0.2) * rampEase;
-        const targetCamX = player.x - width * camAnchor;
+        const targetCamX = player.x - width * 0.5;
         const inStairArea = player.x > terrainParams.stairX - 800;
-        const inRampClimb = transition.scene2Blend > 0.01 && player.x >= SCENE2_RAMP_START_X - 80;
+        const inRampZone = player.x >= SCENE2_RAMP_START_X && player.x < SCENE2_Z_FLOAT_START_X;
+        const inBrokenBridgeZone = player.x >= SCENE2_BROKEN_PLATFORM_START_X && player.x < SCENE2_BROKEN_PLATFORM_END_X;
+        const inZFloatZone = false;
         const stairOffset = (inStairArea && player.y < height * 0.6) ? (height * 0.6 - player.y) : 0;
-        const rampOffset = (inRampClimb && player.y < height * 0.62) ? (height * 0.62 - player.y) : 0;
-        const vertOffset = Math.max(stairOffset, rampOffset);
+        const rampOffset = (inRampZone && player.y < height * 0.62) ? (height * 0.62 - player.y) : 0;
         const pts2 = getTerrainPoints(); const pts4 = getTerrain4Points();
         const inB1 = player.x > pts2.start - 100 && player.x < pts2.end + 600;
         const inB3 = player.x > terrainParams.bX3 - 100 && player.x < terrainParams.bX3 + terrainParams.w3 + 400;
         const inB4 = player.x > pts4.start - 100 && player.x < pts4.end + 600;
-        camera.targetZoom = (inB1 || inB3 || inB4) ? 0.42 : 1.0;
-        camera.targetY = (camera.targetZoom < 1.0) ? 0 : (-vertOffset);
+
+        // 纯坐标分水岭：斜坡模式与悬浮模式并存切换
+        const baseTargetY = -Math.max(rampOffset, stairOffset);
+        if (inZFloatZone) {
+            camera.targetZoom = 1.0;
+            const zFloatTargetY = -(player.y - height * 0.65);
+            const deckY = getScene2ArchBridgeDeckY();
+            const onZTransitionDeck = (player.x <= SCENE2_Z_FLOAT_START_X + 160) && player.grounded && ((player.y + player.height) >= deckY - 10);
+            // 50000 过渡锁：仍在桥面过渡段时，不要让镜头突然下移
+            camera.targetY = onZTransitionDeck ? Math.min(baseTargetY, zFloatTargetY) : zFloatTargetY;
+        } else if (inRampZone) {
+            camera.targetZoom = 1.0;
+            const onRampTopPlatform = scene2Ramp.flatUnlocked && player.x >= scene2Ramp.flatStartX;
+            if (onRampTopPlatform || inBrokenBridgeZone) {
+                // 登上三角斜坡平台后镜头固定，不再随人物跳跃改变高度
+                const fixedDeckY = inBrokenBridgeZone ? getScene2ArchBridgeDeckY() : scene2Ramp.flatY;
+                const platformOffset = (fixedDeckY < height * 0.62) ? (height * 0.62 - fixedDeckY) : 0;
+                // 固定模式下不能再叠加 stairOffset（它依赖 player.y，会导致跳跃时镜头抖动）
+                camera.targetY = -platformOffset;
+            } else {
+                camera.targetY = baseTargetY;
+            }
+        } else {
+            camera.targetZoom = (inB1 || inB3 || inB4) ? 0.42 : 1.0;
+            camera.targetY = baseTargetY;
+        }
         const isZoomedOut = camera.targetZoom < 1.0;
-        const camXDeadzone = isZoomedOut ? 22 : 0;
+        const camXDeadzone = inZFloatZone ? 0 : (isZoomedOut ? 22 : 0);
         const dx = targetCamX - camera.x;
         if (Math.abs(dx) > camXDeadzone) {
-            camera.x += (dx - Math.sign(dx) * camXDeadzone) * (isZoomedOut ? 0.038 : 0.08);
+            camera.x += (dx - Math.sign(dx) * camXDeadzone) * (inZFloatZone ? 0.12 : (isZoomedOut ? 0.038 : 0.08));
         }
         camera.zoom += (camera.targetZoom - camera.zoom) * (isZoomedOut ? 0.008 : 0.012);
-        camera.y += (camera.targetY - camera.y) * (isZoomedOut ? 0.028 : 0.05);
+        // 统一垂直平滑，避免被分支条件打断
+        camera.y += (camera.targetY - camera.y) * 0.1;
+    }
+
+    // 50000 后坠落安全网：回到悬浮区起始平台中心，避免人物消失
+    if (!inVoidFall && player.x >= SCENE2_Z_FLOAT_START_X && player.y > height + 200) {
+        ensureZFloatingPlatforms();
+        const back = getZFloatingEntryCheckpoint();
+        player.x = back.x;
+        player.y = back.y;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = true;
+        player.inputLocked = false;
+        player.state = 'idle';
+        camera.targetY = -(player.y - height * 0.65);
+        camera.y = camera.targetY;
     }
 
     // 诗篇逻辑
@@ -1899,6 +2433,8 @@ function update() {
             s.revealStartAt = 0;
         }
     });
+    // 已按需求移除人物投影和投影周围粒子
+    rampTopShadowParticles = [];
     vegetation.forEach(v => { if (Math.abs(player.x - v.x) < 850) v.growth = Math.min(1, v.growth + 0.04); });
     skyStairs.forEach(s => { if(s.plant && Math.abs(player.x - s.x) < 300) s.plant.growth = Math.min(1, s.plant.growth + 0.05); });
 
@@ -2161,6 +2697,28 @@ function drawRampTurnpointColumnsFront() {
     drawRuinColumnStack(xFront, 3.05, 0.022);
 }
 
+function drawRampTurnpointSymBuilding() {
+    if (transition.scene2Blend < 0.01) return;
+    if (!scene2Ramp.flatUnlocked) return;
+    const img = images.s2_sym_building_01;
+    if (!isImageReady(img)) return;
+
+    // 大幅后移，确保出现在 2 根顶天立地遗迹柱后面
+    const xBack = scene2Ramp.flatStartX + 90;
+    const xFront = scene2Ramp.flatStartX + 250;
+    const x = Math.max(xBack, xFront) + 800;
+    const sx = x - camera.x;
+    if (sx < -900 || sx > width + 900) return;
+
+    // 严格对齐：图片底边与三角斜坡顶部平台同一高度
+    const topAlignY = scene2Ramp.flatY;
+
+    const ih = height * 0.34 * 2.5;
+    const iw = ih * (img.width / img.height);
+    // 图片底部与平台顶边齐平
+    ctx.drawImage(img, sx - iw * 0.5, topAlignY - ih, iw, ih);
+}
+
 function drawGiantBird() {
     if (!giantBird.active) return;
     ctx.save(); ctx.globalAlpha = giantBird.alpha; ctx.fillStyle = "#111"; 
@@ -2411,14 +2969,19 @@ function drawRubbleDragonbonesMid() {
 
 function drawArchBridge() {
     if (transition.scene2Blend < 0.01) return;
-    const bridgeStartSx = SCENE2_ARCH_BRIDGE_START_X - camera.x;
-    const bridgeEndSx = SCENE2_ARCH_BRIDGE_END_X - camera.x;
+    const bridgeDrawStartX = SCENE2_ARCH_BRIDGE_START_X;
+    const bridgeDrawEndX = Math.min(SCENE2_ARCH_BRIDGE_END_X, SCENE2_BROKEN_PLATFORM_START_X);
+    const bridgeStartSx = bridgeDrawStartX - camera.x;
+    const bridgeEndSx = bridgeDrawEndX - camera.x;
     if (bridgeEndSx < -300 || bridgeStartSx > width + 300) return;
 
     const deckY = getScene2ArchBridgeDeckY();
     const deckTopY = deckY;
     const bridgeBodyW = bridgeEndSx - bridgeStartSx;
+    if (bridgeBodyW <= 1) return;
     const bayW = SCENE2_ARCH_BRIDGE_WIDTH / SCENE2_ARCH_COUNT;
+    const startBay = Math.max(0, Math.floor((bridgeDrawStartX - SCENE2_ARCH_BRIDGE_START_X) / bayW));
+    const endBay = Math.min(SCENE2_ARCH_COUNT - 1, Math.ceil((bridgeDrawEndX - SCENE2_ARCH_BRIDGE_START_X) / bayW));
     const bodyColor = "rgba(252,252,252,0.98)";
 
     // 实心水平桥面（顶边与平台地面齐平，厚度向下）
@@ -2440,7 +3003,7 @@ function drawArchBridge() {
     };
 
     // 中大边小：拱门尺寸向两侧递减 + 镂空框架
-    for (let i = 0; i < SCENE2_ARCH_COUNT; i++) {
+    for (let i = startBay; i <= endBay; i++) {
         const centerXWorld = SCENE2_ARCH_BRIDGE_START_X + bayW * (i + 0.5);
         const sx = centerXWorld - camera.x;
         if (sx < -bayW || sx > width + bayW) continue;
@@ -2482,10 +3045,202 @@ function drawArchBridge() {
         ctx.fillRect(sx - colW * 0.5, topIn + 8, colW, botIn - topIn - 16);
         ctx.fillRect(sx - archR * 0.34, topIn + 12, colW, midIn - topIn - 6);
         ctx.fillRect(sx + archR * 0.34 - colW, topIn + 12, colW, midIn - topIn - 6);
+
+        // 桥面附加细节：上缘分段压条 + 细块面，增强纪念性结构感
+        const capY = deckY + 4 + (i % 2) * 1.5;
+        const capW = bayW * 0.72;
+        const capX = sx - capW * 0.5;
+        ctx.fillStyle = "rgba(238,238,241,0.96)";
+        ctx.fillRect(capX, capY, capW, Math.max(2, bayW * 0.015));
+        ctx.fillStyle = "rgba(224,224,228,0.9)";
+        const tileW = Math.max(8, bayW * 0.085);
+        for (let tx = capX + 4; tx < capX + capW - 6; tx += tileW + 4) {
+            ctx.fillRect(tx, capY + 4, tileW, Math.max(2, bayW * 0.012));
+        }
     }
 }
 
+function drawBrokenBridgePlatforms() {
+    if (transition.scene2Blend < 0.01) return;
+    if (player.x >= SCENE2_Z_FLOAT_START_X) return; // 50000 后隐藏断桥
+    if (!brokenBridgePlatforms.length) return;
+    const deckY = getScene2ArchBridgeDeckY();
+    const topColor = "rgba(252,252,252,0.98)";
+    const bodyColor = "rgba(240,240,244,0.94)";
+    const pierColor = "rgba(236,236,240,0.9)";
+    const accentColor = "rgba(218,218,224,0.82)";
+
+    brokenBridgePlatforms.forEach((p, idx) => {
+        const x = p.x - camera.x;
+        if (x > width + 260 || x + p.w < -260) return;
+        const topY = deckY;
+        const bodyH = SCENE2_ARCH_BRIDGE_DECK_THICKNESS + 12;
+
+        ctx.fillStyle = bodyColor;
+        ctx.fillRect(x, topY, p.w, bodyH);
+        ctx.fillStyle = topColor;
+        ctx.fillRect(x, topY, p.w, SCENE2_ARCH_BRIDGE_DECK_THICKNESS);
+
+        // 顶面矩形块面细节
+        const notchW = 26;
+        ctx.fillStyle = accentColor;
+        for (let nx = x + 12; nx < x + p.w - 16; nx += notchW + 10) {
+            ctx.fillRect(nx, topY + 4 + ((idx + Math.floor(nx)) % 2), notchW, 4);
+        }
+
+        // 桥墩（双墩），保持与断桥矩形平台同构
+        const pierW = Math.max(16, p.w * 0.12);
+        const pierY = topY + bodyH - 2;
+        const pierH = p.pierDepth;
+        ctx.fillStyle = pierColor;
+        ctx.fillRect(x + p.w * 0.22 - pierW * 0.5, pierY, pierW, pierH);
+        ctx.fillRect(x + p.w * 0.78 - pierW * 0.5, pierY, pierW, pierH * 0.92);
+
+        // 竖向压条，增加桥墩立体细节
+        ctx.fillStyle = "rgba(222,222,228,0.88)";
+        ctx.fillRect(x + p.w * 0.22 - pierW * 0.2, pierY + 6, pierW * 0.16, pierH - 10);
+        ctx.fillRect(x + p.w * 0.78 - pierW * 0.2, pierY + 6, pierW * 0.16, pierH * 0.92 - 10);
+    });
+}
+
+function drawZFloatingOrganicTrees() {
+    if (!zOrganicTrees.length) return;
+    zOrganicTrees.forEach((t) => {
+        const sx = t.x - camera.x;
+        if (sx < -200 || sx > width + 200) return;
+        const unfold = t.unfold * t.unfold * (3 - 2 * t.unfold);
+        if (unfold < 0.01) return;
+        const h = t.h * (0.35 + unfold * 0.75);
+        const sway = Math.sin(performance.now() * 0.0015 + t.seed) * 8 * unfold;
+        const trunkW = 5 + unfold * 6;
+        const colorL = Math.round(228 * t.tone);
+        const colorM = Math.round(214 * t.tone);
+        const colorD = Math.round(192 * t.tone);
+        ctx.save();
+        ctx.translate(sx, t.y + 1);
+        ctx.fillStyle = `rgba(${colorL},${colorM},${colorD},0.92)`;
+        ctx.beginPath();
+        ctx.moveTo(-trunkW * 0.5, 0);
+        ctx.bezierCurveTo(
+            -trunkW * (0.5 + 0.8 * t.bend), -h * 0.24,
+            trunkW * (0.4 + 0.7 * t.bend) + sway * 0.2, -h * 0.58,
+            sway * 0.35, -h
+        );
+        ctx.bezierCurveTo(
+            sway * 0.55 + trunkW * (0.7 - 0.4 * t.bend), -h * 0.54,
+            -trunkW * (0.3 - 0.4 * t.bend), -h * 0.22,
+            trunkW * 0.52, 0
+        );
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(110,94,104,0.68)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, -h * 0.04);
+        ctx.bezierCurveTo(trunkW * (0.7 + t.bend), -h * 0.28, -trunkW * (0.45 + t.bend), -h * 0.66, sway * 0.35, -h);
+        ctx.stroke();
+
+        const leafColor = "rgba(236,226,231,0.9)";
+        ctx.fillStyle = leafColor;
+        const leafN = 4;
+        for (let i = 0; i < leafN; i++) {
+            const lt = (i + 1) / (leafN + 1);
+            const ly = -h * (0.18 + lt * 0.72);
+            const lx = Math.sin(lt * Math.PI * (1.1 + t.bend)) * (12 + 16 * unfold) + sway * 0.22;
+            const lw = 10 + unfold * 15 - i * 1.2;
+            const lh = 5 + unfold * 8 - i * 0.8;
+            ctx.beginPath();
+            ctx.moveTo(lx - lw * 0.5, ly);
+            ctx.lineTo(lx + lw * 0.52, ly - lh * 0.2);
+            ctx.lineTo(lx + lw * 0.18, ly + lh * 0.7);
+            ctx.lineTo(lx - lw * 0.64, ly + lh * 0.34);
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.restore();
+    });
+}
+
+function drawZFloatingPlatforms() {
+    if (!zFloatingPlatforms.length) return;
+    const bodyPalette = [
+        [248, 244, 246],
+        [244, 238, 242],
+        [241, 235, 238]
+    ];
+    zFloatingPlatforms.forEach((p, i) => {
+        const sx = p.x - camera.x;
+        if (sx < -320 || sx > width + 320) return;
+        ctx.save();
+        ctx.translate(sx, p.y);
+
+        const c = bodyPalette[i % bodyPalette.length];
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.98)`;
+        ctx.beginPath();
+        ctx.moveTo(p.poly[0].x, p.poly[0].y);
+        for (let k = 1; k < p.poly.length; k++) ctx.lineTo(p.poly[k].x, p.poly[k].y);
+        ctx.closePath();
+        ctx.fill();
+
+        // 扁平分面：轻微明暗块面，避免大渐变
+        const cx = p.poly.reduce((sum, n) => sum + n.x, 0) / p.poly.length;
+        const cy = p.poly.reduce((sum, n) => sum + n.y, 0) / p.poly.length;
+        for (let k = 0; k < p.poly.length; k++) {
+            const a = p.poly[k];
+            const b = p.poly[(k + 1) % p.poly.length];
+            const lit = 0.86 + 0.08 * Math.sin(i * 0.9 + k * 1.2);
+            const fr = Math.round(c[0] * lit);
+            const fg = Math.round(c[1] * lit);
+            const fb = Math.round(c[2] * lit);
+            ctx.fillStyle = `rgba(${fr},${fg},${fb},0.32)`;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 细折线网格（深灰/暗红）
+        ctx.strokeStyle = "rgba(116,88,98,0.42)";
+        ctx.lineWidth = 0.8;
+        p.patchLines.forEach((ln) => {
+            ctx.beginPath();
+            ctx.moveTo(ln.x0, ln.y0);
+            ctx.lineTo(ln.x1, ln.y1);
+            ctx.stroke();
+        });
+
+        // 外轮廓
+        ctx.strokeStyle = "rgba(92,72,82,0.74)";
+        ctx.lineWidth = 1.05;
+        ctx.beginPath();
+        ctx.moveTo(p.poly[0].x, p.poly[0].y);
+        for (let k = 1; k < p.poly.length; k++) ctx.lineTo(p.poly[k].x, p.poly[k].y);
+        ctx.closePath();
+        ctx.stroke();
+
+        // 伴随碎片
+        p.shards.forEach((sPoly, idx) => {
+            const tint = idx % 2 === 0 ? "rgba(244,238,241,0.92)" : "rgba(238,230,235,0.9)";
+            ctx.fillStyle = tint;
+            ctx.beginPath();
+            ctx.moveTo(sPoly[0].x, sPoly[0].y);
+            for (let m = 1; m < sPoly.length; m++) ctx.lineTo(sPoly[m].x, sPoly[m].y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "rgba(100,82,92,0.62)";
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+        });
+
+        ctx.restore();
+    });
+}
+
 function drawBridgeSkyCurtain() {
+    return; // 按需求移除背景矩形横竖条天幕
     if (transition.scene2Blend < 0.01) return;
     if (!skyCurtain.active) return;
     if (player.x < SCENE2_ARCH_BRIDGE_START_X - 120) return;
@@ -2628,29 +3383,64 @@ function drawWindDebugHUD() {
     ctx.restore();
 }
 
+function drawRampTopShadowAndParticles() {
+    return;
+    const onRampTopPlatform = scene2Ramp.flatUnlocked &&
+        player.x >= scene2Ramp.flatStartX &&
+        player.x < SCENE2_BROKEN_PLATFORM_START_X;
+    if (!onRampTopPlatform) return;
+
+    const footY = player.y + player.height;
+    const shadowRx = Math.max(16, player.width * 0.5);
+    const shadowRy = Math.max(6, player.height * 0.09);
+    const shadowCx = player.x - camera.x + player.width * 0.5;
+    const shadowCy = footY + shadowRy; // 顶部与人物底部齐平
+
+    ctx.save();
+    ctx.fillStyle = '#b64e52';
+    ctx.globalAlpha = 0.72;
+    ctx.beginPath();
+    ctx.ellipse(shadowCx, shadowCy, shadowRx, shadowRy, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    rampTopShadowParticles.forEach(p => {
+        ctx.globalAlpha = Math.max(0, p.life) * 0.9;
+        ctx.fillStyle = '#b64e52';
+        ctx.beginPath();
+        ctx.arc(p.x - camera.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
 function drawSnowAndFlowers() {
     if (transition.scene2Blend < 0.01) return;
-    const groundY = height - groundH;
+    const baseGroundY = height - groundH;
     snowPiles.forEach(s => {
         const sx = s.x - camera.x;
         if (sx < -200 || sx > width + 200) return;
+        const gy = getGroundHeight(s.x, 9999);
+        if (gy > height + 1000) return;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.beginPath();
-        ctx.moveTo(sx - s.w * 0.5, groundY);
-        ctx.quadraticCurveTo(sx - s.w * 0.22, groundY - s.h * 0.95, sx, groundY - s.h);
-        ctx.quadraticCurveTo(sx + s.w * 0.24, groundY - s.h * 0.9, sx + s.w * 0.5, groundY);
+        ctx.moveTo(sx - s.w * 0.5, gy);
+        ctx.quadraticCurveTo(sx - s.w * 0.22, gy - s.h * 0.95, sx, gy - s.h);
+        ctx.quadraticCurveTo(sx + s.w * 0.24, gy - s.h * 0.9, sx + s.w * 0.5, gy);
         ctx.closePath();
         ctx.fill();
     });
     redFlowers.forEach(f => {
         const fx = f.x - camera.x;
         if (fx < -50 || fx > width + 50) return;
+        const gy = getGroundHeight(f.x, 9999);
+        if (gy > height + 1000) return;
+        if (Math.abs(gy - baseGroundY) > height * 4) return;
         const tipX = fx + Math.sin(f.tilt) * 2.6;
-        const tipY = groundY - f.h;
+        const tipY = gy - f.h;
         ctx.strokeStyle = "rgba(255,255,255,0.9)";
         ctx.lineWidth = 0.8;
         ctx.beginPath();
-        ctx.moveTo(fx, groundY);
+        ctx.moveTo(fx, gy);
         ctx.lineTo(tipX, tipY);
         ctx.stroke();
         ctx.fillStyle = "rgba(255,255,255,0.95)";
@@ -2660,13 +3450,44 @@ function drawSnowAndFlowers() {
     });
 }
 
+function drawScene2RuinMid() {
+    if (transition.scene2Blend < 0.01) return;
+    scene2RuinsMid.forEach(r => {
+        const img = images[r.imgKey];
+        if (!isImageReady(img)) return;
+        const sx = r.x - camera.x;
+        if (sx < -300 || sx > width + 300) return;
+        const gy = getGroundHeight(r.x, 9999);
+        const ih = height * (0.18 + 0.1 * r.scale);
+        const iw = ih * (img.width / img.height);
+        // 中景层：不压到人物前景
+        ctx.drawImage(img, sx - iw * 0.5, gy - ih + 8, iw, ih);
+    });
+}
+
+function drawScene2PlatformColumns() {
+    if (transition.scene2Blend < 0.01) return;
+    scene2ColumnsDeck.forEach(c => {
+        const img = images[c.imgKey];
+        if (!isImageReady(img)) return;
+        const sx = c.x - camera.x;
+        if (sx < -360 || sx > width + 360) return;
+        const gy = getGroundHeight(c.x, 9999);
+        const ih = height * (0.26 + 0.2 * c.scale);
+        const iw = ih * (img.width / img.height);
+        ctx.drawImage(img, sx - iw * 0.5, gy - ih, iw, ih);
+    });
+}
+
 
 function drawOrganicBranch(v) {
     const vx = v.x - camera.x; if(vx < -200 || vx > width + 200) return;
+    const gy = getGroundHeight(v.x, 9999);
+    if (gy > height + 1000) return;
     const t = transition.scene2Blend;
     const branchColor = t > 0 ? lerpColor("000000", "ffffff", t) : "#000";
     const slopeSinkY = (v.x >= SCENE2_RAMP_START_X) ? 12 : 0;
-    ctx.save(); ctx.translate(vx, getGroundHeight(v.x, 9999) + slopeSinkY); ctx.scale(1, v.growth); ctx.fillStyle = branchColor;
+    ctx.save(); ctx.translate(vx, gy + slopeSinkY); ctx.scale(1, v.growth); ctx.fillStyle = branchColor;
     ctx.beginPath(); ctx.moveTo(-v.thickness / 2, 0); 
     ctx.bezierCurveTo(v.curvePoints[1].dx - v.thickness / 2.5, v.curvePoints[1].dy, v.curvePoints[2].dx - v.thickness / 6, v.curvePoints[2].dy, v.curvePoints[3].dx, v.curvePoints[3].dy);
     ctx.bezierCurveTo(v.curvePoints[2].dx + v.thickness / 10, v.curvePoints[2].dy, v.curvePoints[1].dx + v.thickness / 3, v.curvePoints[1].dy, v.thickness / 2, 0);
@@ -2952,7 +3773,6 @@ function draw() {
         ctx.drawImage(images.bg1, 0, 0, width, height);
         ctx.globalAlpha = 1.0;
     }
-    drawBridgeSkyCurtain();
     // 旧版代码风大画面已停用，转场由视频层接管
     if (transition.scene2Blend > 0.01) drawWatercolorBlobs();
     
@@ -3057,6 +3877,8 @@ function draw() {
     drawWindTransitionColumn();
     drawScene2SkyColumn();
     drawRampTurnpointColumnsBack();
+    drawScene2RuinMid();
+    drawScene2PlatformColumns();
     
     // ✨ 远景/中景武器渲染
     weapons.filter(w => w.depth > 0.3).forEach(drawWeapon);
@@ -3232,6 +4054,11 @@ function draw() {
         }
     }
     drawArchBridge();
+    drawBrokenBridgePlatforms();
+    drawZFloatingPlatforms();
+    drawZFloatingOrganicTrees();
+    // 放在白色斜坡地形之后绘制，避免被地形填充遮住
+    drawRampTurnpointSymBuilding();
     drawSnowAndFlowers();
     drawFloatingShards(false);
 
@@ -3277,6 +4104,8 @@ function draw() {
     ctx.globalAlpha = 1.0;
 
     if (isImageReady(images.building04)) { const bH4 = pts4.h * 2.3; ctx.drawImage(images.building04, terrainParams.bX4 - 400 - camera.x, height - groundH - bH4 + 50, bH4 * (images.building04.width/images.building04.height), bH4); }
+
+    drawRampTopShadowAndParticles();
 
     const pImgs = images[player.state];
     if (pImgs && pImgs[player.frame] && isImageReady(pImgs[player.frame])) {
