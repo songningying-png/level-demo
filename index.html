@@ -85,6 +85,7 @@
             <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
                 <button class="btn" onclick="jumpToScene2()">第二关</button>
                 <button class="btn" onclick="jumpToBrokenBridgeZone()">断桥坐标</button>
+                <button class="btn" onclick="jumpToZFloatingPlatformZone()">悬空平台坐标</button>
                 <button class="btn" onclick="jumpToRampTopRomanColumn()">三角斜坡顶部平台罗马柱</button>
                 <button class="btn" onclick="restartGame()">重新开始</button>
             </div>
@@ -613,8 +614,8 @@ function ensureZFloatingPlatforms() {
     const totalRise = Math.max(height * 2.8, height * SCENE2_Z_FLOAT_TOTAL_HEIGHT_RATIO);
     const laneAmp = 180;
     const laneStepX = 200;
-    const riseStep = 170;
-    const count = Math.ceil(totalRise / riseStep);
+    const riseStep = 128;
+    const count = Math.ceil(totalRise / riseStep) + Math.ceil(height * 0.14 / riseStep);
     const baseX = SCENE2_Z_FLOAT_START_X + 40;
 
     // 入场保底平台：确保 49500 附近可以直接起跳衔接到悬浮路线
@@ -1811,6 +1812,50 @@ function jumpToBrokenBridgeZone() {
         player.vy = 0;
         alignCameraInstant();
     }
+    transition.scene2Blend = 1;
+    windTransition.phase = 'done';
+    windTransition.done = true;
+    windTransition.intensity = 0;
+    destroyWindVideoOverlay();
+    lateStageCheckpoint.x = player.x;
+    lateStageCheckpoint.y = player.y;
+    lateStageCheckpoint.valid = true;
+}
+
+function jumpToZFloatingPlatformZone() {
+    if (gameState === 'MENU') return;
+    const safeFlatStartX = SCENE2_RAMP_START_X + 360;
+    scene2Ramp.started = true;
+    scene2Ramp.flatUnlocked = true;
+    scene2Ramp.flatStartX = safeFlatStartX;
+    const rawFlatY = scene2RampEdgeY(safeFlatStartX);
+    const minSafeY = height * 0.24;
+    const maxSafeY = height - groundH - 26;
+    scene2Ramp.flatY = Math.max(minSafeY, Math.min(maxSafeY, rawFlatY));
+    scene2Ramp.unlockedAt = performance.now() - SCENE2_PLATFORM_REVEAL_MS;
+
+    // 暂停菜单跳转：清空后重生，避免旧缓存与当前桥面高度不一致；并避免 ensure 因 length>0 直接 return
+    zFloatingPlatforms = [];
+    zOrganicTrees = [];
+    ensureZFloatingPlatforms();
+
+    if (!zFloatingPlatforms.length) {
+        const gy = getScene2ArchBridgeDeckY();
+        jumpTo(SCENE2_BROKEN_PLATFORM_END_X + 22, false);
+        player.y = gy - 132 - player.height;
+        player.grounded = true;
+        player.vy = 0;
+        alignCameraInstant();
+    } else {
+        const p = zFloatingPlatforms[0];
+        const targetX = p.x + Math.max(28, Math.min(120, p.w * 0.22));
+        jumpTo(targetX, false);
+        player.y = p.y - player.height;
+        player.grounded = true;
+        player.vy = 0;
+        alignCameraInstant();
+    }
+    // jumpTo → syncProgressForJump 会 initWindTransitionMarker，把 windTransition.done 置回 false，这里与断桥跳转一致再钉死
     transition.scene2Blend = 1;
     windTransition.phase = 'done';
     windTransition.done = true;
