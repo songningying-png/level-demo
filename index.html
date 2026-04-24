@@ -300,7 +300,13 @@ const assets = {
         'Assets/Sprites/Player/player_idle_004.png'
     ],
     downhill: ['Assets/Sprites/Player/player_jump_001.png'],
-    slide: Array.from({ length: 54 }, (_, idx) => `Assets/Sprites/Player/player_slide_${String(idx).padStart(5, '0')}.png`),
+    // 线上缺少 slide 序列时，回退到 run 序列，避免人物在移动端丢失
+    slide: [
+        'Assets/Sprites/Player/player_run_001.png',
+        'Assets/Sprites/Player/player_run_002.png',
+        'Assets/Sprites/Player/player_run_003.png',
+        'Assets/Sprites/Player/player_run_004.png'
+    ],
     jump: [
         'Assets/Sprites/Player/player_jump_001.png',
         'Assets/Sprites/Player/player_jump_002.png',
@@ -1820,7 +1826,7 @@ const gravity = 0.7;
 const friction = 0.85;
 let gameState = 'MENU';
 let camera = { x: 0, y: 0, zoom: 1, targetZoom: 1, targetY: 0, shakeLand: 0 };
-const images = { run: [], idle: [], slide: [], jump: [] };
+const images = { run: [], idle: [], downhill: [], slide: [], jump: [] };
 let loadedCount = 0;
 
 function isImageReady(img) { return img && img.complete && img.naturalWidth !== 0; }
@@ -1838,9 +1844,15 @@ function loadImages() {
         img.src = url;
         images[key] = img;
     });
-    ['run', 'idle', 'slide', 'jump'].forEach(key => {
+    ['run', 'idle', 'downhill', 'slide', 'jump'].forEach(key => {
         assets[key].forEach((src, idx) => {
-            const img = new Image(); img.src = src; 
+            const img = new Image();
+            img.onerror = () => {
+                if (img.dataset.fallback === '1' || !src.startsWith('./')) return;
+                img.dataset.fallback = '1';
+                img.src = src.slice(2);
+            };
+            img.src = src;
             img.onload = () => loadedCount++;
             images[key][idx] = img;
         });
