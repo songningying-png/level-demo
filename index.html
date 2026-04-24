@@ -4551,19 +4551,6 @@ function drawWeapon(w) {
 
 function drawSkyStair(stair) {
     const rx = stair.x - camera.x; if(rx < -500 || rx > width + 500) return;
-    if (stair.isTop) {
-        const img = images.lv1_transition_blackred_tree_01;
-        if (isImageReady(img)) {
-            // 用图片替代过渡节点的黑色T型小地形；按图片比例自动匹配宽高
-            const drawH = Math.max(height * 0.88, stair.h * 11.6);
-            const drawW = drawH * (img.width / Math.max(1, img.height));
-            const drawX = rx - drawW * 0.5;
-            const drawY = stair.y + stair.h - drawH;
-            ctx.drawImage(img, drawX, drawY, drawW, drawH);
-        }
-        // 顶部过渡节点不再回退到黑色T型绘制
-        return;
-    }
     ctx.save(); ctx.translate(rx, stair.y);
     const t = transition.scene2Blend;
     const stairDark = t > 0 ? lerpColor("000000", "ffffff", t) : "#000";
