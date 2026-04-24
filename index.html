@@ -253,10 +253,10 @@ const gitBase = "https://raw.githubusercontent.com/songningying-png/demo-game/ma
 const assets = {
     bg: 'Assets/Sprites/Scene1_BoneRuins/Parallax/bg_0.png',
     bg1: 'Assets/Sprites/Scene2_RedDesert/Parallax/bg_1.png',
-    vista: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_vista2.png',
+    vista: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_clouds_far.png',
     hand: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_hand_statue1.png',
     building02: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building_02_full.png',
-    building03: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building_03_full.png',
+    building03: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building04_full.png',
     building04: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_building04_full.png',
     b3GiantTree01: './Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_b3_giant_tree_01.png',
     b3GiantTree02: './Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_b3_giant_tree_02.png',
@@ -281,7 +281,7 @@ const assets = {
     s2_giant_statue_main_01: 'Assets/scene2/statues/s2_giant_statue_main_01.png',
     s2_giant_statue_side_01: 'Assets/scene2/statues/s2_giant_statue_side_01.png',
     s1_sky_bird_sheet: 'Assets/animations/scene1/s1_sky_bird_sheet_4x4.png',
-    giant_statue: 'Assets/scene2/giant_statue.png',
+    giant_statue: 'Assets/scene2/statues/s2_giant_statue_main_01.png',
     guide_hand_l1_stairs_up: 'Assets/Sprites/Guides/Hands/guide_hand_l1_stairs_up.png',
     guide_hand_l2_ramp_45up: 'Assets/Sprites/Guides/Hands/guide_hand_l2_ramp_45up.png',
     guide_hand_l2_brokenbridge_forward: 'Assets/Sprites/Guides/Hands/guide_hand_l2_brokenbridge_forward.png',
@@ -299,7 +299,7 @@ const assets = {
         'Assets/Sprites/Player/player_idle_003.png',
         'Assets/Sprites/Player/player_idle_004.png'
     ],
-    downhill: ['Assets/Sprites/Player/player_downhill.png'],
+    downhill: ['Assets/Sprites/Player/player_jump_001.png'],
     slide: Array.from({ length: 54 }, (_, idx) => `Assets/Sprites/Player/player_slide_${String(idx).padStart(5, '0')}.png`),
     jump: [
         'Assets/Sprites/Player/player_jump_001.png',
@@ -3508,16 +3508,16 @@ const AUDIO_MANIFEST = {
             'Assets/Audio/SFX/chime.mp3'
         ],
         stair_footstep_magic: [
-            'Assets/Audio/SFX/step1.mp3',
-            'Assets/Audio/SFX/step2.mp3'
+            'Assets/Audio/SFX/jump.mp3',
+            'Assets/Audio/SFX/particle_touch.mp3'
         ],
         particle_touch: [
             'Assets/Audio/SFX/particle_touch.mp3'
         ],
         run_step: [
-            'Assets/Audio/SFX/run1.mp3',
-            'Assets/Audio/SFX/run2.mp3',
-            'Assets/Audio/SFX/run.mp3'
+            'Assets/Audio/SFX/jump.mp3',
+            'Assets/Audio/SFX/chime.mp3',
+            'Assets/Audio/SFX/particle_touch.mp3'
         ]
     }
 };
