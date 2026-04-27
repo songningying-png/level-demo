@@ -60,10 +60,51 @@
             z-index: 0;
             pointer-events: none;
         }
+        .start-screen-shape,
+        .start-screen-shape-hover,
+        .start-screen-character {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        .start-screen-shape {
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            mix-blend-mode: screen;
+        }
+        .start-screen-shape-hover {
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+            mix-blend-mode: screen;
+        }
+        .start-screen-character {
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .start-core-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 3;
+            pointer-events: none;
+            transform-origin: center center;
+        }
         .start-screen-center {
             position: absolute;
             inset: 0;
-            z-index: 1;
+            z-index: 4;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -71,9 +112,20 @@
             padding-bottom: 0;
             pointer-events: none;
         }
-        .start-ui-btn {
+        #start-transition-mask {
             position: absolute;
             inset: 0;
+            z-index: 8;
+            background: #000;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .start-ui-btn {
+            position: absolute;
+            left: 50%;
+            top: calc(82% - 160px);
+            transform: translate(-50%, -50%);
+            width: min(7vw, 105px);
             border: 0;
             background: transparent;
             padding: 0;
@@ -81,12 +133,21 @@
             cursor: pointer;
             pointer-events: auto;
             outline: none;
+            transition: transform 0.14s ease, filter 0.14s ease, opacity 0.14s ease;
+        }
+        .start-ui-btn:hover {
+            transform: translate(-50%, -50%) scale(1.08);
+            filter: brightness(1.1) drop-shadow(0 0 10px rgba(255, 150, 165, 0.55));
+        }
+        .start-ui-btn:active {
+            transform: translate(-50%, -50%) scale(0.96);
+            filter: brightness(0.92) drop-shadow(0 0 4px rgba(255, 130, 150, 0.32));
         }
         .start-ui-btn img {
             display: block;
             width: 100%;
-            height: 100%;
-            object-fit: cover;
+            height: auto;
+            object-fit: contain;
             user-select: none;
             -webkit-user-drag: none;
         }
@@ -103,17 +164,24 @@
         }
         #ending-back-btn {
             pointer-events: auto;
-            padding: 14px 32px;
-            border: 1px solid rgba(0,0,0,0.92);
-            background: rgba(0,0,0,0.08);
-            color: #111;
-            font-size: 20px;
-            letter-spacing: 1px;
+            padding: 0;
+            border: 0;
+            background: transparent;
             cursor: pointer;
             transition: all 0.25s ease;
         }
-        #ending-back-btn:hover {
-            background: rgba(0,0,0,0.2);
+        #ending-back-btn img {
+            display: block;
+            width: min(12vw, 180px);
+            height: auto;
+            user-select: none;
+            -webkit-user-drag: none;
+            filter: drop-shadow(0 0 10px rgba(255,255,255,0.28));
+            transition: transform 0.2s ease, filter 0.2s ease;
+        }
+        #ending-back-btn:hover img {
+            transform: scale(1.03);
+            filter: drop-shadow(0 0 14px rgba(255,255,255,0.4));
         }
 
         .btn {
@@ -191,7 +259,11 @@
 
 <div id="ui-layer">
     <div id="start-screen" class="screen-overlay">
-        <img class="start-screen-bg" src="Assets/UI/Start/ui_start_screen_01.png" alt="start screen">
+        <img id="start-screen-bg" class="start-screen-bg" src="Assets/UI/StartCustom/start_bg_main.png" alt="start screen background">
+        <img id="start-screen-shape" class="start-screen-shape" src="Assets/UI/StartCustom/start_shape_main.png" alt="start screen shape">
+        <img id="start-screen-shape-hover" class="start-screen-shape-hover" src="Assets/UI/StartCustom/start_shape_main01.png" alt="start screen shape hover">
+        <img id="start-screen-character" class="start-screen-character" src="Assets/UI/StartCustom/start_character_main.png" alt="start screen character">
+        <canvas id="start-core-canvas" class="start-core-canvas"></canvas>
         <div class="start-screen-center">
             <button
                 id="start-ui-btn"
@@ -205,9 +277,10 @@
                 onclick="return false;"
                 aria-label="开始旅程"
             >
-                <img id="start-ui-btn-img" src="Assets/UI/Start/ui_start_button_01_idle.png" alt="开始旅程">
+                <img id="start-ui-btn-img" src="Assets/UI/StartCustom/start_button_main.png" alt="开始旅程">
             </button>
         </div>
+        <div id="start-transition-mask"></div>
     </div>
 
     <div id="pause-screen" class="screen-overlay">
@@ -232,7 +305,9 @@
         </div>
     </div>
     <div id="ending-action-wrap">
-        <button id="ending-back-btn" type="button" onclick="endGameBackToStart()">结束游戏，重回开头</button>
+        <button id="ending-back-btn" type="button" onclick="endGameBackToStart()" aria-label="结束游戏，重回开头">
+            <img id="ending-back-btn-img" src="Assets/UI/EndingCustom/ending_button_main.png" alt="结束游戏，重回开头">
+        </button>
     </div>
 </div>
 
@@ -250,6 +325,12 @@
 // --- 全局配置与资�?---
 const SKY_COLOR = '#d1d1d1'; 
 const gitBase = "https://raw.githubusercontent.com/songningying-png/demo-game/main/";
+const PLAYER_RUN_FRAME_MAX = 12;
+const buildNumberedFrames = (prefix, maxCount) =>
+    Array.from({ length: maxCount }, (_, i) => {
+        const n = String(i + 1).padStart(3, '0');
+        return `${prefix}${n}.png`;
+    });
 const assets = {
     bg: 'Assets/Sprites/Scene1_BoneRuins/Parallax/bg_0.png',
     bg1: 'Assets/Sprites/Scene2_RedDesert/Parallax/bg_1.png',
@@ -264,10 +345,13 @@ const assets = {
     lv1_cave_bg_01: './Assets/Sprites/Scene1_BoneRuins/Cave/lv1_cave_bg_01.png',
     lv1_cave_fg_01: './Assets/Sprites/Scene1_BoneRuins/Cave/lv1_cave_fg_01.png',
     lv1_cave_beam_left_01: './Assets/Sprites/Scene1_BoneRuins/Cave/lv1_cave_beam_left_01.png',
-    ui_start_screen_01: './Assets/UI/Start/ui_start_screen_01.png',
-    ui_start_button_01_idle: './Assets/UI/Start/ui_start_button_01_idle.png',
-    ui_start_button_01_hover: './Assets/UI/Start/ui_start_button_01_hover.png',
-    ui_start_button_01_pressed: './Assets/UI/Start/ui_start_button_01_pressed.png',
+    ui_start_screen_01: './Assets/UI/StartCustom/start_bg_main.png',
+    ui_start_button_01_idle: './Assets/UI/StartCustom/start_button_main.png',
+    ui_start_button_01_hover: './Assets/UI/StartCustom/start_button_main.png',
+    ui_start_button_01_pressed: './Assets/UI/StartCustom/start_button_main.png',
+    ui_ending_screen_01: './Assets/UI/EndingCustom/ending_bg_main.png',
+    ui_ending_button_01: './Assets/UI/EndingCustom/ending_button_main.png',
+    ui_ending_logo_01: './Assets/UI/EndingCustom/ending_logo_main.png',
     clouds_far: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_clouds_far.png',
     ruinsDebris: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_ruins_debris01.png',
     mtn01: 'Assets/Sprites/Scene1_BoneRuins/Parallax/lv1_mountain01_mid.png',
@@ -280,19 +364,14 @@ const assets = {
     s2_sym_building_01: 'Assets/scene2/s2_sym_building_01.png',
     s2_giant_statue_main_01: 'Assets/scene2/statues/s2_giant_statue_main_01.png',
     s2_giant_statue_side_01: 'Assets/scene2/statues/s2_giant_statue_side_01.png',
-    s1_sky_bird_sheet: 'Assets/animations/scene1/s1_sky_bird_sheet_4x4.png',
+    s1_sky_bird_sheet: 'Assets/animations/scene1/s1_sky_bird_sheet_5x5.png',
     giant_statue: 'Assets/scene2/statues/s2_giant_statue_main_01.png',
     guide_hand_l1_stairs_up: 'Assets/Sprites/Guides/Hands/guide_hand_l1_stairs_up.png',
     guide_hand_l2_ramp_45up: 'Assets/Sprites/Guides/Hands/guide_hand_l2_ramp_45up.png',
     guide_hand_l2_brokenbridge_forward: 'Assets/Sprites/Guides/Hands/guide_hand_l2_brokenbridge_forward.png',
     guide_hand_l2_float_up: 'Assets/Sprites/Guides/Hands/guide_hand_l2_float_up.png',
     lv1_transition_blackred_tree_01: 'Assets/Sprites/Scene1_BoneRuins/Foreground/lv1_transition_blackred_tree_01.png',
-    run: [
-        'Assets/Sprites/Player/player_run_001.png',
-        'Assets/Sprites/Player/player_run_002.png',
-        'Assets/Sprites/Player/player_run_003.png',
-        'Assets/Sprites/Player/player_run_004.png'
-    ],
+    run: buildNumberedFrames('Assets/Sprites/Player/player_run_', PLAYER_RUN_FRAME_MAX),
     idle: [
         'Assets/Sprites/Player/player_idle_001.png',
         'Assets/Sprites/Player/player_idle_002.png',
@@ -301,16 +380,12 @@ const assets = {
     ],
     downhill: ['Assets/Sprites/Player/player_jump_001.png'],
     // 线上缺少 slide 序列时，回退到 run 序列，避免人物在移动端丢失
-    slide: [
-        'Assets/Sprites/Player/player_run_001.png',
-        'Assets/Sprites/Player/player_run_002.png',
-        'Assets/Sprites/Player/player_run_003.png',
-        'Assets/Sprites/Player/player_run_004.png'
-    ],
+    slide: buildNumberedFrames('Assets/Sprites/Player/player_run_', PLAYER_RUN_FRAME_MAX),
     jump: [
         'Assets/Sprites/Player/player_jump_001.png',
         'Assets/Sprites/Player/player_jump_002.png',
-        'Assets/Sprites/Player/player_jump_003.png'
+        'Assets/Sprites/Player/player_jump_003.png',
+        'Assets/Sprites/Player/player_jump_004.png'
     ]
 };
 
@@ -320,7 +395,6 @@ let width, height, groundH, playerH;
 const LOGIC_W = 1184;
 const LOGIC_H = 666;
 const RENDER_SCALE = 3;
-const START_BTN_LOGIC_RECT = { x: 0, y: 0, w: LOGIC_W, h: LOGIC_H };
 const PLAYER_DRAW_SCALE = 1.5;      // 人物素材整体放大1.5倍
 const PLAYER_DRAW_FOOT_OFFSET = 0.0; // 还原默认锚点偏移
 
@@ -333,17 +407,11 @@ function applyStartScreenLayout(displayX, displayY, displayW, displayH) {
         bg.style.width = `${displayW}px`;
         bg.style.height = `${displayH}px`;
     }
-    if (btn) {
-        const sx = displayW / LOGIC_W;
-        const sy = displayH / LOGIC_H;
-        const x = displayX + START_BTN_LOGIC_RECT.x * sx;
-        const y = displayY + START_BTN_LOGIC_RECT.y * sy;
-        const w = START_BTN_LOGIC_RECT.w * sx;
-        const h = START_BTN_LOGIC_RECT.h * sy;
-        btn.style.left = `${x}px`;
-        btn.style.top = `${y}px`;
-        btn.style.width = `${w}px`;
-        btn.style.height = `${h}px`;
+    if (btn) btn.style.height = 'auto';
+    const coreCanvas = document.getElementById('start-core-canvas');
+    if (coreCanvas) {
+        coreCanvas.width = Math.max(1, Math.floor(displayW));
+        coreCanvas.height = Math.max(1, Math.floor(displayH));
     }
 }
 
@@ -779,7 +847,7 @@ function updateWindOverlayLifecycle() {
 // 默认风视频路径（你可替换为自己的素材路径）
 setWindVideoSource('./assets/wind-transition.mp4');
 setLeafFallVideoSource('./Assets/Videos/lv1_b3_leaf_fall_transition_01.mp4');
-setB3TreeVideoSource('./Assets/Videos/lv1_b3_giant_tree_01.webm');
+setB3TreeVideoSource('./Assets/Videos/lv1_b3_giant_tree_01.mp4');
 
 const terrainParams = {
     bX2: 4000, b2ImageX: 3200, peakOffset2: 2200, peakRadius2: 120, h2Ratio: 0.55, climbAngle2: 40,
@@ -821,10 +889,10 @@ let bridgeLoreEvent = {
     lockCamY: 0,
     lockZoom: 1,
     lines: [
-        '连接现实与虚妄的桥梁早已断裂。',
-        '我踩着你破碎的意志，在重力的深渊上逆风而行。',
-        '哪怕粉身碎骨，你也要将最危险的秘密封死在梦境深处吗？',
-        '别怕，事务所的委托，我一定会完成。'
+        '桥已断，',
+        '我踏着你破碎意志逆风而行。',
+        '秘密深锁梦境',
+        '别怕，我定会完成委托。'
     ]
 };
 let endingLoreEvent = {
@@ -837,15 +905,20 @@ let endingLoreEvent = {
     revealLine: 0,
     revealChar: 0,
     revealTick: 0,
+    doneHoldFrames: 0,
+    textFade: 1,
+    logoFade: 0,
+    displayFade: 0,
     whiteFade: 0,
     lockCamX: 0,
     lockCamY: 0,
     lockZoom: 1,
     lines: [
-        '终于找到你了，沉睡在街机里的无名英雄。',
-        '你用石化的身躯挡住了时代的崩塌，却让自己成了人们口中恐惧的“怪谈”。',
-        '四散的微光已经集结，',
-        '醒来吧，或者...在光芒中安息。'
+        '找到你了。',
+        '你挡住崩塌却沦为怪谈。',
+        '微光集结',
+        '醒来吧，英雄，',
+        '或在光中安息。'
     ]
 };
 let ringParticles = [];
@@ -856,8 +929,10 @@ let poemData = { alpha: 0, show: false, state: 'idle', lines: [], timer: 0, isFi
 let giantBird = {
     x: 0, y: 0, active: false, alpha: 0, flap: 0,
     frameTimer: 0, frame: 0,
-    sheetCols: 4, sheetRows: 4, frameCount: 16, fps: 12
+    vy: 0, bank: 0, trail: [],
+    sheetCols: 5, sheetRows: 5, frameCount: 25, fps: 12
 }; 
+let giantBirdFrameCache = null;
 let ambientStorm = []; 
 let stones = []; 
 let weapons = []; // 剑和戟
@@ -1006,6 +1081,10 @@ function getPlatformTopOrbWorldPos() {
 
 function ensureBrokenBridgePlatforms() {
     if (brokenBridgePlatforms.length) return;
+    // 必须等到斜坡解锁后才能生成断桥，避免用错误的桥面高度（fallback -7490）创建平台
+    // 若提前生成（scene2Blend>0.01时flatUnlocked=false），平台 Y 与后续 flatY 不一致，
+    // 玩家走到 43260+ 后 shapeCastGroundAtFeet 采样到旧平台高度，瞬间被弹飞导致"消失"
+    if (!scene2Ramp.flatUnlocked) return;
     const deckY = getScene2ArchBridgeDeckY();
     let x = SCENE2_BROKEN_PLATFORM_START_X;
     let idx = 0;
@@ -1502,8 +1581,8 @@ function updateGiantStardustPath() {
             if ((p.stardustDelay || 0) > 0) {
                 p.stardustDelay -= 1;
             } else {
-                p.x += (t.x - p.x) * 0.06;
-                p.y += (t.y - p.y) * 0.06;
+                p.x += (t.x - p.x) * 0.12;
+                p.y += (t.y - p.y) * 0.12;
             }
             const ddx = t.x - p.x;
             const ddy = t.y - p.y;
@@ -1803,6 +1882,7 @@ let downhillDustFx = {
     particles: [],
     nextSpawnAt: 0
 };
+let downhillAnimHoldUntil = 0;
 
 const VOID_TERM_VELOCITY = 9.2;
 const VOID_GRAVITY = 0.42;
@@ -1830,9 +1910,14 @@ const images = { run: [], idle: [], downhill: [], slide: [], jump: [] };
 let loadedCount = 0;
 
 function isImageReady(img) { return img && img.complete && img.naturalWidth !== 0; }
+function getPlayableFrames(state) {
+    const seq = images[state];
+    if (!seq || seq.length === 0) return [];
+    return seq.filter(isImageReady);
+}
 
 function loadImages() {
-    ['bg', 'bg1', 'vista', 'hand', 'building02', 'building03', 'building04', 'b3GiantTree01', 'b3GiantTree02', 'b3FgOccluder01', 'lv1_cave_bg_01', 'lv1_cave_fg_01', 'lv1_cave_beam_left_01', 'ui_start_screen_01', 'ui_start_button_01_idle', 'ui_start_button_01_hover', 'ui_start_button_01_pressed', 'clouds_far', 'ruinsDebris', 'mtn01', 'mtn02', 's2_column_01', 's2_column_02', 's2_column_03', 's2_ruin_mid_01', 's2_ruin_mid_02', 's2_sym_building_01', 's2_giant_statue_main_01', 's2_giant_statue_side_01', 's1_sky_bird_sheet', 'giant_statue', 'guide_hand_l1_stairs_up', 'guide_hand_l2_ramp_45up', 'guide_hand_l2_brokenbridge_forward', 'guide_hand_l2_float_up', 'lv1_transition_blackred_tree_01'].forEach(key => {
+    ['bg', 'bg1', 'vista', 'hand', 'building02', 'building03', 'building04', 'b3GiantTree01', 'b3GiantTree02', 'b3FgOccluder01', 'lv1_cave_bg_01', 'lv1_cave_fg_01', 'lv1_cave_beam_left_01', 'ui_start_screen_01', 'ui_start_button_01_idle', 'ui_start_button_01_hover', 'ui_start_button_01_pressed', 'ui_ending_screen_01', 'ui_ending_button_01', 'ui_ending_logo_01', 'clouds_far', 'ruinsDebris', 'mtn01', 'mtn02', 's2_column_01', 's2_column_02', 's2_column_03', 's2_ruin_mid_01', 's2_ruin_mid_02', 's2_sym_building_01', 's2_giant_statue_main_01', 's2_giant_statue_side_01', 's1_sky_bird_sheet', 'giant_statue', 'guide_hand_l1_stairs_up', 'guide_hand_l2_ramp_45up', 'guide_hand_l2_brokenbridge_forward', 'guide_hand_l2_float_up', 'lv1_transition_blackred_tree_01'].forEach(key => {
         const img = new Image();
         const url = assets[key];
         img.onload = () => loadedCount++;
@@ -1848,7 +1933,9 @@ function loadImages() {
         assets[key].forEach((src, idx) => {
             const img = new Image();
             img.onerror = () => {
-                if (img.dataset.fallback === '1' || !src.startsWith('./')) return;
+                if (img.dataset.fallback === '1' || !src.startsWith('./')) {
+                    return;
+                }
                 img.dataset.fallback = '1';
                 img.src = src.slice(2);
             };
@@ -1899,18 +1986,19 @@ function getHandObstacleY(worldX) {
     if (worldX < handX || worldX > handX + handW) return null;
 
     const t = (worldX - handX) / Math.max(1, handW);
-    // t: 0(�? -> 1(�?，yNorm: 相对手图高度
+    // t: 0(左) -> 1(右)，yNorm: 像素实测上边缘行 / 图片高度 + 0.03 自然踩入偏移
+    // 实测来源：对 lv1_hand_statue1.png (2432×1200) 按列采样首个不透明像素行
     const profile = [
-        { t: 0.00, yNorm: 0.82 },
-        { t: 0.08, yNorm: 0.70 },
-        { t: 0.18, yNorm: 0.56 },
-        { t: 0.30, yNorm: 0.45 },
-        { t: 0.42, yNorm: 0.37 }, // 顶部主平
-        { t: 0.54, yNorm: 0.35 }, // 顶部延展，减少“顶点掉进图层
-        { t: 0.66, yNorm: 0.40 },
-        { t: 0.78, yNorm: 0.53 },
-        { t: 0.90, yNorm: 0.68 },
-        { t: 1.00, yNorm: 0.82 }
+        { t: 0.00, yNorm: 0.95 }, // 左端图片透明，碰撞贴近地面
+        { t: 0.08, yNorm: 0.90 }, // 实测 0.865
+        { t: 0.18, yNorm: 0.72 }, // 实测 0.686
+        { t: 0.30, yNorm: 0.51 }, // 实测 0.477
+        { t: 0.42, yNorm: 0.31 }, // 实测 0.276
+        { t: 0.54, yNorm: 0.20 }, // 实测 0.166
+        { t: 0.66, yNorm: 0.19 }, // 实测 0.161
+        { t: 0.78, yNorm: 0.18 }, // 实测 0.148（最高点：指关节顶）
+        { t: 0.90, yNorm: 0.27 }, // 实测 0.238
+        { t: 1.00, yNorm: 0.53 }, // 实测 0.501
     ];
     for (let i = 0; i < profile.length - 1; i++) {
         const a = profile[i];
@@ -2037,8 +2125,7 @@ function getGroundHeight(worldX, currentY) {
     }
     const handTop = getHandObstacleY(worldX);
     if (handTop != null) {
-        // 障碍手改为“实体体积”：地面到轮廓顶都不可穿透，只能沿轮廓跑到顶部
-        return handTop - 26;
+        return handTop;
     }
     const pts2 = getTerrainPoints();
     if (worldX >= pts2.start && worldX <= pts2.end) {
@@ -2723,6 +2810,17 @@ const START_BTN_STATE_SRC = {
     pressed: assets.ui_start_button_01_pressed
 };
 let startBtnPointerDown = false;
+const startMenuFX = {
+    active: true,
+    phase: 'idle', // idle -> expanding -> fading
+    phaseAt: 0,
+    shapeScale: 1,
+    characterScale: 1,
+    coreScale: 1,
+    contentAlpha: 1,
+    maskAlpha: 0,
+    launched: false
+};
 
 function setStartButtonState(state) {
     const img = document.getElementById('start-ui-btn-img');
@@ -2732,11 +2830,19 @@ function setStartButtonState(state) {
 
 function onStartButtonEnter() {
     if (startBtnPointerDown) return;
+    const shapeLayer = document.getElementById('start-screen-shape');
+    const shapeHoverLayer = document.getElementById('start-screen-shape-hover');
+    if (shapeLayer) shapeLayer.style.display = 'none';
+    if (shapeHoverLayer) shapeHoverLayer.style.display = 'block';
     setStartButtonState('hover');
 }
 
 function onStartButtonLeave() {
     startBtnPointerDown = false;
+    const shapeLayer = document.getElementById('start-screen-shape');
+    const shapeHoverLayer = document.getElementById('start-screen-shape-hover');
+    if (shapeLayer) shapeLayer.style.display = 'block';
+    if (shapeHoverLayer) shapeHoverLayer.style.display = 'none';
     setStartButtonState('idle');
 }
 
@@ -2751,25 +2857,160 @@ function onStartButtonUp(ev) {
     if (!startBtnPointerDown) return;
     startBtnPointerDown = false;
     setStartButtonState('hover');
-    initGame();
+    beginStartJourneyTransition();
 }
 
 function onStartButtonKeyDown(ev) {
     if (!ev) return;
     if (ev.key === 'Enter' || ev.key === ' ') {
         ev.preventDefault();
-        initGame();
+        beginStartJourneyTransition();
     }
 }
 
-function initGame() {
-    document.getElementById('start-screen').style.display = 'none';
+function initGame(options = {}) {
+    if (options.hideStartScreen !== false) {
+        document.getElementById('start-screen').style.display = 'none';
+    }
     showEndingActionButton(false);
     gameState = 'PLAYING';
     unlockAudioSystem();
     audioRegistry.playBgm('scene1_main');
     resize(); initDecorations(); restartPlayer();
     requestAnimationFrame(update);
+}
+
+function beginStartJourneyTransition() {
+    if (startMenuFX.phase !== 'idle') return;
+    startMenuFX.phase = 'expanding';
+    startMenuFX.phaseAt = performance.now();
+}
+
+function setStartVisualLayersVisible(visible) {
+    const displayValue = visible ? '' : 'none';
+    const bgLayer = document.getElementById('start-screen-bg');
+    const shapeLayer = document.getElementById('start-screen-shape');
+    const shapeHoverLayer = document.getElementById('start-screen-shape-hover');
+    const charLayer = document.getElementById('start-screen-character');
+    const coreCanvas = document.getElementById('start-core-canvas');
+    const centerLayer = document.querySelector('.start-screen-center');
+    if (bgLayer) bgLayer.style.display = displayValue;
+    if (shapeLayer) shapeLayer.style.display = displayValue;
+    if (shapeHoverLayer) shapeHoverLayer.style.display = 'none';
+    if (charLayer) charLayer.style.display = displayValue;
+    if (coreCanvas) coreCanvas.style.display = displayValue;
+    if (centerLayer) centerLayer.style.display = displayValue;
+}
+
+function drawStartCore(nowMs) {
+    const coreCanvas = document.getElementById('start-core-canvas');
+    if (!coreCanvas) return;
+    const c2d = coreCanvas.getContext('2d');
+    if (!c2d) return;
+    const w = coreCanvas.width || 1;
+    const h = coreCanvas.height || 1;
+    c2d.clearRect(0, 0, w, h);
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const t = nowMs * 0.001;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.1);
+    const transitionCoreScale = Math.max(1, startMenuFX.coreScale || 1);
+    const coreScale = 0.92 + pulse * 0.34;
+    const coreAlpha = 0.72 + pulse * 0.28;
+    const glowR = Math.max(60, w * 0.11) * (0.9 + pulse * 0.78) * transitionCoreScale;
+
+    // Outer red watercolor glow layer.
+    const glow = c2d.createRadialGradient(cx, cy, 3, cx, cy, glowR);
+    glow.addColorStop(0, `rgba(255,236,241,${0.42 + pulse * 0.16})`);
+    glow.addColorStop(0.3, `rgba(255,110,124,${0.34 + pulse * 0.2})`);
+    glow.addColorStop(1, 'rgba(255,70,82,0)');
+    c2d.fillStyle = glow;
+    c2d.beginPath();
+    c2d.arc(cx, cy, glowR, 0, Math.PI * 2);
+    c2d.fill();
+
+    // Inner bright four-point star layer.
+    c2d.save();
+    c2d.translate(cx, cy);
+    c2d.scale(coreScale * transitionCoreScale, coreScale * transitionCoreScale);
+    c2d.rotate(Math.sin(t * 0.42) * 0.08);
+    c2d.shadowBlur = 48 + pulse * 28;
+    c2d.shadowColor = `rgba(255,135,148,${0.58 + pulse * 0.22})`;
+    c2d.fillStyle = `rgba(255,247,249,${coreAlpha})`;
+    const starR = Math.max(28, w * 0.032);
+    c2d.beginPath();
+    c2d.moveTo(0, -starR);
+    c2d.lineTo(starR * 0.23, -starR * 0.23);
+    c2d.lineTo(starR, 0);
+    c2d.lineTo(starR * 0.23, starR * 0.23);
+    c2d.lineTo(0, starR);
+    c2d.lineTo(-starR * 0.23, starR * 0.23);
+    c2d.lineTo(-starR, 0);
+    c2d.lineTo(-starR * 0.23, -starR * 0.23);
+    c2d.closePath();
+    c2d.fill();
+    c2d.restore();
+}
+
+function updateStartMenuEffects(nowMs) {
+    if (!startMenuFX.active) return;
+    drawStartCore(nowMs);
+
+    const centerLayer = document.querySelector('.start-screen-center');
+    const bgLayer = document.getElementById('start-screen-bg');
+    const shapeLayer = document.getElementById('start-screen-shape');
+    const shapeHoverLayer = document.getElementById('start-screen-shape-hover');
+    const charLayer = document.getElementById('start-screen-character');
+    const coreCanvas = document.getElementById('start-core-canvas');
+    const mask = document.getElementById('start-transition-mask');
+
+    if (startMenuFX.phase === 'expanding') {
+        const p = Math.max(0, Math.min(1, (nowMs - startMenuFX.phaseAt) / 1000));
+        const ease = (v) => v * v * (3 - 2 * v);
+        const shapeP = ease(Math.max(0, Math.min(1, (p - 0.1) / 0.9)));
+        const characterP = ease(Math.max(0, Math.min(1, (p - 0.04) / 0.9)));
+        const coreP = ease(Math.max(0, Math.min(1, p / 0.85)));
+        startMenuFX.shapeScale = 1 + shapeP * 5.2;
+        startMenuFX.characterScale = 1 + characterP * 6.8;
+        startMenuFX.coreScale = 1 + coreP * 8.4;
+        startMenuFX.maskAlpha = Math.max(0, (p - 0.58) / 0.42);
+        if (p >= 1) {
+            startMenuFX.phase = 'fading';
+            startMenuFX.phaseAt = nowMs;
+            startMenuFX.contentAlpha = 0;
+            setStartVisualLayersVisible(false);
+        }
+    } else if (startMenuFX.phase === 'fading') {
+        const p = Math.max(0, Math.min(1, (nowMs - startMenuFX.phaseAt) / 420));
+        startMenuFX.maskAlpha = 1 - p;
+        if (!startMenuFX.launched) {
+            startMenuFX.launched = true;
+            initGame({ hideStartScreen: false });
+        }
+        if (p >= 1) {
+            document.getElementById('start-screen').style.display = 'none';
+            startMenuFX.active = false;
+            return;
+        }
+    }
+
+    if (bgLayer) bgLayer.style.opacity = '1';
+    if (shapeLayer) shapeLayer.style.transform = `translate(-50%, -50%) scale(${startMenuFX.shapeScale.toFixed(3)})`;
+    if (shapeHoverLayer) shapeHoverLayer.style.transform = `translate(-50%, -50%) scale(${startMenuFX.shapeScale.toFixed(3)})`;
+    if (charLayer) charLayer.style.transform = `translate(-50%, -50%) scale(${startMenuFX.characterScale.toFixed(3)})`;
+    if (coreCanvas) coreCanvas.style.transform = 'none';
+    if (centerLayer) {
+        const uiScale = Math.min(1.2, 1 + (startMenuFX.characterScale - 1) * 0.06);
+        centerLayer.style.transform = `scale(${uiScale.toFixed(3)})`;
+    }
+    if (shapeLayer) shapeLayer.style.opacity = '1';
+    if (shapeHoverLayer) shapeHoverLayer.style.opacity = '1';
+    if (charLayer) charLayer.style.opacity = '1';
+    if (coreCanvas) coreCanvas.style.opacity = `${startMenuFX.contentAlpha.toFixed(3)}`;
+    if (centerLayer) centerLayer.style.opacity = `${startMenuFX.contentAlpha.toFixed(3)}`;
+    if (mask) mask.style.opacity = startMenuFX.maskAlpha.toFixed(3);
+
+    requestAnimationFrame(updateStartMenuEffects);
 }
 
 function restartPlayer() {
@@ -2824,6 +3065,10 @@ function restartGame() {
     endingLoreEvent.revealLine = 0;
     endingLoreEvent.revealChar = 0;
     endingLoreEvent.revealTick = 0;
+    endingLoreEvent.doneHoldFrames = 0;
+    endingLoreEvent.textFade = 1;
+    endingLoreEvent.logoFade = 0;
+    endingLoreEvent.displayFade = 0;
     endingLoreEvent.whiteFade = 0;
     showEndingActionButton(false);
     document.getElementById('pause-screen').style.display = 'none';
@@ -3246,6 +3491,10 @@ function startEndingLoreEvent() {
     endingLoreEvent.revealLine = 0;
     endingLoreEvent.revealChar = 0;
     endingLoreEvent.revealTick = 0;
+    endingLoreEvent.doneHoldFrames = 0;
+    endingLoreEvent.textFade = 1;
+    endingLoreEvent.logoFade = 0;
+    endingLoreEvent.displayFade = 0;
     endingLoreEvent.whiteFade = 0;
     endingLoreEvent.lockCamX = camera.x;
     endingLoreEvent.lockCamY = camera.y;
@@ -3340,9 +3589,20 @@ function updateLoreEvents() {
                 endingLoreEvent.revealTick = 0;
             }
         } else {
+            endingLoreEvent.displayFade = Math.min(1, endingLoreEvent.displayFade + 0.01);
             stepReveal(endingLoreEvent, false);
+            if (endingLoreEvent.phase === 'done') {
+                if (endingLoreEvent.doneHoldFrames <= 0) endingLoreEvent.doneHoldFrames = 600; // 10s @ 60fps
+                endingLoreEvent.doneHoldFrames -= 1;
+                if (endingLoreEvent.doneHoldFrames <= 0) {
+                    endingLoreEvent.phase = 'logo';
+                }
+            } else if (endingLoreEvent.phase === 'logo') {
+                endingLoreEvent.textFade = Math.max(0, endingLoreEvent.textFade - 0.02);
+                endingLoreEvent.logoFade = Math.min(1, endingLoreEvent.logoFade + 0.02);
+            }
         }
-        if (endingLoreEvent.phase === 'done') {
+        if (endingLoreEvent.phase === 'logo') {
             showEndingActionButton(true);
         }
     } else {
@@ -3361,7 +3621,7 @@ function getLoreVisibleLines(evt) {
 }
 
 function drawLoreOverlay() {
-    const drawTextBlock = (lines, baseY, color = '#ffffff', shadow = 'rgba(255,255,255,0.45)') => {
+    const drawTextBlock = (lines, baseY, color = '#ffffff', shadow = 'rgba(255,255,255,0.45)', alphaMul = 1) => {
         if (!lines.length) return;
         const drawSpacedCenteredText = (text, x, y, spacing) => {
             if (!text || spacing <= 0) {
@@ -3391,9 +3651,39 @@ function drawLoreOverlay() {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const alpha = Math.min(1, 0.32 + i * 0.14);
-            ctx.globalAlpha = alpha;
-            ctx.font = "100 16px 'Microsoft YaHei'";
+            ctx.globalAlpha = alpha * alphaMul;
+            ctx.font = "100 22px 'Microsoft YaHei'";
             drawSpacedCenteredText(line, width * 0.5, baseY + i * lineGap, charSpacing);
+        }
+        ctx.restore();
+    };
+    const drawEndingGeometricRings = (cx, cy, alphaMul) => {
+        const ringCount = 3;
+        const now = performance.now() * 0.001;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.lineWidth = 0.5;
+        ctx.shadowBlur = 2;
+        ctx.shadowColor = `rgba(0,0,0,${0.18})`;
+
+        for (let i = 0; i < ringCount; i++) {
+            const radiusBase = (34 + i * 20) * 9;
+            const breathAmp = 18 + i * 6;
+            const breath = Math.sin(now * 1.08 + i * 0.75) * breathAmp;
+            const radius = radiusBase + breath;
+            const alphaBreath = 0.32 + 0.14 * (0.5 + 0.5 * Math.sin(now * 1.08 + i * 0.75));
+
+            // odd: clockwise, even: counterclockwise
+            const dir = (i % 2 === 1) ? 1 : -1;
+            const rot = dir * now * (0.018 + i * 0.004); // very slow
+
+            ctx.save();
+            ctx.rotate(rot);
+            ctx.strokeStyle = `rgba(0,0,0,${alphaBreath})`;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
         }
         ctx.restore();
     };
@@ -3410,8 +3700,30 @@ function drawLoreOverlay() {
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
         if (endingLoreEvent.phase !== 'white') {
+            const bg = images.ui_ending_screen_01;
+            if (isImageReady(bg)) {
+                ctx.save();
+                ctx.globalAlpha = endingLoreEvent.displayFade;
+                ctx.drawImage(bg, 0, 0, width, height);
+                ctx.restore();
+            }
+            const cx = width * 0.5;
+            const cy = height * 0.5;
+            const textAlpha = endingLoreEvent.displayFade * endingLoreEvent.textFade;
+            drawEndingGeometricRings(cx, cy, 1);
             const lines = getLoreVisibleLines(endingLoreEvent);
-            drawTextBlock(lines, height * 0.32, '#111111', 'rgba(0,0,0,0.25)');
+            drawTextBlock(lines, height * 0.32, '#111111', 'rgba(0,0,0,0.24)', textAlpha);
+            const logo = images.ui_ending_logo_01;
+            if (isImageReady(logo) && endingLoreEvent.logoFade > 0.001) {
+                const logoW = logo.width / 3;
+                const logoH = logo.height / 3;
+                const logoX = width * 0.5 - logoW * 0.5;
+                const logoY = height * 0.5 - logoH * 0.5;
+                ctx.save();
+                ctx.globalAlpha = endingLoreEvent.logoFade * endingLoreEvent.displayFade;
+                ctx.drawImage(logo, logoX, logoY, logoW, logoH);
+                ctx.restore();
+            }
         }
     }
 }
@@ -3836,8 +4148,11 @@ function update() {
                 scene2Ramp.flatUnlocked = true;
                 scene2Ramp.unlockedAt = rampNow;
                 scene2Ramp.flatStartX = player.x; // 20秒到达的当前位置就是平地起点
-                // 计算 45 度角的当�?Y 高度
+                // 计算 45 度角的当前 Y 高度
                 scene2Ramp.flatY = scene2RampEdgeY(player.x);
+                // 清除可能在 flatUnlocked=false 时提前生成的旧平台（高度错误），
+                // 下一帧 ensureBrokenBridgePlatforms 将按正确的 flatY 重新生成
+                brokenBridgePlatforms = [];
             }
         }
     }
@@ -3901,7 +4216,8 @@ function update() {
     // Magical footsteps on sky stairs / ramp when grounded and moving.
     const movingHoriz = Math.abs(player.vx) > 0.5;
     const onStairLike = player.x >= terrainParams.stairX - 80 && player.x < SCENE2_BROKEN_PLATFORM_START_X;
-    if (player.grounded && movingHoriz && onStairLike && audioRegistry.unlocked) {
+    const isScene1 = transition.scene2Blend < 0.01;
+    if (isScene1 && player.grounded && movingHoriz && onStairLike && audioRegistry.unlocked) {
         const beatStep = (60 / 85) * 0.5;
         const nowSec = performance.now() / 1000;
         if (nowSec >= audioSys.nextFootstepAt) {
@@ -3909,14 +4225,7 @@ function update() {
             playMagicalFootstep();
         }
     }
-    if (player.grounded && movingHoriz && !onStairLike && audioRegistry.unlocked) {
-        const runStep = 0.22;
-        const nowSec = performance.now() / 1000;
-        if (nowSec >= audioSys.nextRunAt) {
-            audioSys.nextRunAt = nowSec + runStep;
-            playRunFootstep();
-        }
-    }
+    // 第二关禁用人物跑步/脚步音效，仅第一关保留此段楼梯魔法脚步声
 
     if (inVoidFall) {
         const elapsed = performance.now() - voidFall.startTime;
@@ -4200,13 +4509,21 @@ function update() {
     const prevState = player.state;
     const downhillMove = isPlayerMovingDownhill();
     const triangleDownhill = isOnTriangleDownhillSegment();
-    if (!player.grounded) player.state = 'jump';
-    else if (triangleDownhill || downhillMove) player.state = 'downhill';
+    const downhillNowMs = performance.now();
+    if (triangleDownhill || downhillMove) downhillAnimHoldUntil = downhillNowMs + 140;
+    // 缓坡（23°）坡度下落速率（≈2.15px/帧）> 重力（0.7px/帧），玩家每6帧振荡一次离地，
+    // 导致 downhill→jump 快速切换引起动画闪烁。去除grounded限制并用 |vy|<8 代替：
+    // 振荡离地时 vy 仅 0.7~4.2（<8）→ 保持下坡动画；
+    // 真实跳跃 vy=-16（|vy|≥8）→ 正常显示跳跃帧；定时器在真实跳跃顶点前早已超时，
+    // 下落阶段 vy>0 时 keepDownhillAnim 必为 false，不影响跳跃落地动画。
+    const keepDownhillAnim = Math.abs(player.vx) > 0.18 && downhillNowMs < downhillAnimHoldUntil && Math.abs(player.vy) < 8;
+    if (!player.grounded && !keepDownhillAnim) player.state = 'jump';
+    else if (triangleDownhill || downhillMove || keepDownhillAnim) player.state = 'downhill';
     else if (moving || Math.abs(player.vx) > 0.5) player.state = 'run';
     else player.state = 'idle';
     if (inVoidFall && voidFall.fallState === 'freeFall') player.state = 'idle';
     if (player.state !== prevState) player.frameTimer = 0;
-    const anim = images[player.state];
+    const anim = getPlayableFrames(player.state);
     if (anim && anim.length > 0) {
         if (player.state === 'jump') {
             // 跳跃改为“按物理阶段选帧”，避免循环错序与卡
@@ -4229,6 +4546,10 @@ function update() {
                 if (jumpFrames >= 8 && player.vy > 10) idx = 7;
             }
             player.frame = Math.max(0, Math.min(jumpFrames - 1, idx));
+        } else if (player.state === 'downhill') {
+            // 下坡状态固定首帧，避免坡面/平地交界处动画闪烁
+            player.frame = 0;
+            player.frameTimer = 0;
         } else {
             const step = player.state === 'run' ? 0.22 : 0.12;
             player.frameTimer = (player.frameTimer || 0) + step;
@@ -4325,16 +4646,25 @@ function update() {
         specialOrb.triggered = true; specialOrb.ringBurstAt = performance.now(); poemData.show = true; poemData.state = 'fadein'; poemData.isFirst = true;
         audioRegistry.playSfx('particle_touch');
         playStardustLitChime();
-        poemData.lines = ["立于高地，", "视线穿越尘世与心灵。", "曾被遮蔽的方向，", "在静默中显现。"];
+        poemData.lines = ["霓虹遗忘灰烬，", "世人畏你如怪谈。", "但这折翼之鸟，", "仍守着你渴望天空的温柔"];
         player.inputLocked = true; player.vx = 0;
         for (let i = 0; i < 3000; i++) { const a = (i/3000)*Math.PI*2, s=15+Math.random()*20; ringParticles.push({x:6200, y:height-groundH-height*0.55-50, vx:Math.cos(a)*s, vy:Math.sin(a)*s, alpha:1, size:1.2}); }
-        giantBird.active = true; giantBird.x = width + 600; giantBird.y = height * 0.22;
+        giantBird.active = true;
+        giantBird.x = width + 600;
+        giantBird.y = height * 0.22;
+        giantBird.alpha = 0;
+        giantBird.flap = Math.random() * Math.PI * 2;
+        giantBird.frameTimer = Math.random() * giantBird.frameCount;
+        giantBird.frame = Math.floor(giantBird.frameTimer) % giantBird.frameCount;
+        giantBird.vy = 0;
+        giantBird.bank = 0;
+        giantBird.trail = [];
     }
     if (!specialOrb2.triggered && !player.grounded && Math.abs(player.x - specialOrb2.x) < 50 && Math.abs(player.y - (specialOrb2.y - player.height)) < 40) {
         specialOrb2.triggered = true; specialOrb2.ringBurstAt = performance.now(); poemData.show = true; poemData.state = 'fadein'; poemData.isFirst = false;
         audioRegistry.playSfx('particle_touch');
         playStardustLitChime();
-        poemData.lines = ["阴影在穹顶溺亡时", "会折叠成新的对称", "石料们以克重", "计算千年后", "崩塌的环境"];
+        poemData.lines = ["狂风剥落理智", "契约殿堂化作残垣。", "诅咒吞噬内心，", "风中微光证明你仍在苦撑。"];
         player.inputLocked = true; player.vx = 0;
         for(let i=0; i<4; i++) expansionRings.push({ r: 0, dr: 10 + i*8, alpha: 1 });
     }
@@ -4423,11 +4753,24 @@ function update() {
     }
 
     if (giantBird.active) {
-        giantBird.x -= 2.8;
-        giantBird.flap += 0.04;
+        giantBird.y = height * 0.22;
+        const flapForce = Math.sin(giantBird.flap * 0.9);
+        const travelSpeed = 2.8 + 0.45 * Math.sin(giantBird.flap * 0.35 + 0.6);
+        giantBird.x -= travelSpeed;
+        giantBird.flap += 0.085;
+        giantBird.vy = 0;
+        giantBird.bank = 0;
         giantBird.alpha = Math.min(0.65, giantBird.alpha + 0.005);
-        giantBird.frameTimer += giantBird.fps / 60;
+        const frameSpeedMul = 1 + 0.28 * Math.abs(flapForce);
+        giantBird.frameTimer += (giantBird.fps / 60) * frameSpeedMul;
         giantBird.frame = Math.floor(giantBird.frameTimer) % giantBird.frameCount;
+        giantBird.trail.push({
+            x: giantBird.x,
+            y: giantBird.y,
+            bank: giantBird.bank,
+            alpha: giantBird.alpha * 0.22
+        });
+        if (giantBird.trail.length > 6) giantBird.trail.shift();
         if (giantBird.x < -1500) giantBird.active = false;
     }
     ringParticles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.vx *= 0.985; p.vy *= 0.985; p.alpha -= 0.008; if (p.alpha <= 0) ringParticles.splice(i, 1); });
@@ -4855,22 +5198,96 @@ function drawEndpointForearmPlatformBack() {
 function drawGiantBird() {
     if (!giantBird.active) return;
     const bx = giantBird.x;
-    const by = giantBird.y + Math.sin(giantBird.flap * 0.5) * 25;
+    const by = giantBird.y;
     const sheet = images.s1_sky_bird_sheet;
     if (isImageReady(sheet)) {
-        const cols = giantBird.sheetCols || 4;
-        const rows = giantBird.sheetRows || 4;
+        const getPlayableBirdFrames = (img, cols, rows) => {
+            const cacheKey = `${img.width}x${img.height}_${cols}x${rows}`;
+            if (giantBirdFrameCache && giantBirdFrameCache.key === cacheKey) {
+                return giantBirdFrameCache;
+            }
+            const sw = Math.floor(img.width / cols);
+            const sh = Math.floor(img.height / rows);
+            const frameTotal = cols * rows;
+            const tmp = document.createElement("canvas");
+            tmp.width = sw;
+            tmp.height = sh;
+            const tctx = tmp.getContext("2d", { willReadFrequently: true });
+            const frames = [];
+            const frameBottoms = [];
+            if (!tctx || sw <= 0 || sh <= 0) {
+                giantBirdFrameCache = { key: cacheKey, frames: [], yOffsets: [] };
+                return giantBirdFrameCache;
+            }
+            for (let fi = 0; fi < frameTotal; fi++) {
+                const sx = (fi % cols) * sw;
+                const sy = Math.floor(fi / cols) * sh;
+                tctx.clearRect(0, 0, sw, sh);
+                tctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+                const data = tctx.getImageData(0, 0, sw, sh).data;
+                let solid = 0;
+                let minY = sh;
+                let maxY = -1;
+                for (let p = 3; p < data.length; p += 16) {
+                    if (data[p] > 10) {
+                        solid++;
+                        if (solid > 26) break;
+                    }
+                }
+                if (solid > 26) {
+                    for (let y = 0; y < sh; y++) {
+                        let rowSolid = false;
+                        for (let x = 0; x < sw; x++) {
+                            const alpha = data[(y * sw + x) * 4 + 3];
+                            if (alpha > 18) {
+                                rowSolid = true;
+                                break;
+                            }
+                        }
+                        if (rowSolid) {
+                            if (y < minY) minY = y;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                    frames.push(fi);
+                    frameBottoms.push(maxY >= 0 ? maxY : sh - 1);
+                }
+            }
+            const refBottom = frameBottoms.length ? Math.max(...frameBottoms) : sh - 1;
+            const yOffsets = frameBottoms.map((b) => refBottom - b);
+            giantBirdFrameCache = { key: cacheKey, frames, yOffsets };
+            return giantBirdFrameCache;
+        };
+
+        const cols = giantBird.sheetCols || 5;
+        const rows = giantBird.sheetRows || 5;
         const frameCount = giantBird.frameCount || (cols * rows);
-        const f = giantBird.frame % frameCount;
+        const frameData = getPlayableBirdFrames(sheet, cols, rows);
+        const playableFrames = frameData.frames || [];
+        const yOffsets = frameData.yOffsets || [];
+        const maxPlayable = playableFrames.length > 0 ? playableFrames.length : frameCount;
+        const logicalFrame = giantBird.frame % Math.max(1, maxPlayable);
+        const f = playableFrames.length > 0 ? playableFrames[logicalFrame] : logicalFrame;
         const sw = Math.floor(sheet.width / cols);
         const sh = Math.floor(sheet.height / rows);
         const sx = (f % cols) * sw;
         const sy = Math.floor(f / cols) * sh;
         const drawH = width * 0.22;
         const drawW = drawH * (sw / Math.max(1, sh));
+        const yOffsetPx = ((yOffsets[logicalFrame] || 0) * drawH) / Math.max(1, sh);
+        for (let i = 0; i < giantBird.trail.length; i++) {
+            const t = giantBird.trail[i];
+            const fade = (i + 1) / giantBird.trail.length;
+            ctx.save();
+            ctx.globalAlpha = t.alpha * fade;
+            ctx.translate(t.x, t.y);
+            ctx.drawImage(sheet, sx, sy, sw, sh, -drawW * 0.5, -drawH * 0.5 + yOffsetPx, drawW, drawH);
+            ctx.restore();
+        }
         ctx.save();
         ctx.globalAlpha = giantBird.alpha;
-        ctx.drawImage(sheet, sx, sy, sw, sh, bx - drawW * 0.5, by - drawH * 0.5, drawW, drawH);
+        ctx.translate(bx, by);
+        ctx.drawImage(sheet, sx, sy, sw, sh, -drawW * 0.5, -drawH * 0.5 + yOffsetPx, drawW, drawH);
         ctx.restore();
         return;
     }
@@ -5245,6 +5662,16 @@ function drawScene1ForegroundDust() {
 
 function drawScene1CaveFollowBeams() {
     if (!isPlayerInScene1Cave()) return;
+    const beamFadeInStartX = 22222;
+    const beamFadeInEndX = 22848;
+    const beamFadeInT = (player.x - beamFadeInStartX) / (beamFadeInEndX - beamFadeInStartX);
+    const beamFadeInAlpha = Math.max(0, Math.min(1, beamFadeInT));
+    const beamFadeStartX = 26000;
+    const beamFadeEndX = 26626;
+    const beamFadeT = (player.x - beamFadeStartX) / (beamFadeEndX - beamFadeStartX);
+    const beamFadeAlpha = 1 - Math.max(0, Math.min(1, beamFadeT));
+    const beamAlpha = beamFadeInAlpha * beamFadeAlpha;
+    if (beamAlpha <= 0.001) return;
     // 光束跟随人物，同时叠加微小视差（与山洞背景不同步）
     const beamParallax = camera.x * 0.01 + Math.sin(performance.now() * 0.0013 + 0.7) * 4;
     const baseX = player.x - camera.x + player.width * 0.5 + beamParallax;
@@ -5257,7 +5684,7 @@ function drawScene1CaveFollowBeams() {
         const topY = -height * 0.02;
 
         ctx.save();
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.5 * beamAlpha;
         const leftX = baseX - drawW * 0.62;
         ctx.drawImage(beamImg, leftX, topY, drawW, drawH);
         ctx.globalAlpha = 1.0;
@@ -5271,7 +5698,7 @@ function drawScene1CaveFollowBeams() {
     const beamW = Math.max(28, width * 0.025);
     ctx.save();
     const flicker = 0.85 + 0.15 * Math.sin(t * 1.2 + 1.3);
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.5 * beamAlpha;
     ctx.translate(baseX - 70, baseY);
     ctx.rotate(Math.PI * 0.25);
     const g = ctx.createLinearGradient(0, 0, 0, beamLen);
@@ -6482,7 +6909,7 @@ function draw() {
         drawLandingDustWorld();
         drawDownhillDustWorld();
         drawVoidCapeBehindPlayer();
-        const pImgsV = images[player.state];
+        const pImgsV = getPlayableFrames(player.state);
         if (pImgsV && pImgsV[player.frame] && isImageReady(pImgsV[player.frame])) {
             const curImg = pImgsV[player.frame], px = player.x - camera.x + player.width / 2, py = player.y + player.height / 2;
             const { drawW, drawH } = getPlayerDrawSize(curImg, player.state);
@@ -7007,8 +7434,13 @@ function draw() {
     drawScene1CaveLayer(false);
     // 山洞内上升白色发光粒子（27040 后自动停止并消失）
     drawScene1CaveRiseParticles();
+    // 第一关障碍手在人物之前绘制，确保人物显示在其前面
+    if (isImageReady(images.hand)) {
+        const hh = height * 0.45;
+        ctx.drawImage(images.hand, 1500 - camera.x, height - groundH - hh + 10, hh * (images.hand.width / images.hand.height), hh);
+    }
 
-    const pImgs = images[player.state];
+    const pImgs = getPlayableFrames(player.state);
     if (pImgs && pImgs[player.frame] && isImageReady(pImgs[player.frame])) {
         const curImg = pImgs[player.frame], px = player.x-camera.x+player.width/2, py = player.y+player.height/2;
         const { drawW, drawH } = getPlayerDrawSize(curImg, player.state);
@@ -7129,13 +7561,14 @@ function draw() {
         });
     }
     // 已按需求移除 lv1_ruins_debris01 绘制
-    if (isImageReady(images.hand)) { const hh = height*0.45; ctx.drawImage(images.hand, 1500-camera.x, height-groundH-hh+10, hh*(images.hand.width/images.hand.height), hh); }
     ctx.restore();
     drawLoreOverlay();
     drawWindDebugHUD();
 }
 
+resize();
 loadImages();
+requestAnimationFrame(updateStartMenuEffects);
 </script>
 </body>
 </html>
