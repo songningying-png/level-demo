@@ -457,7 +457,6 @@ const SKY_COLOR = '#d1d1d1';
 const DEV_PAUSE_TOOLS_ENABLED =
     /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
     new URLSearchParams(window.location.search).get('devtools') === '1';
-const gitBase = "https://raw.githubusercontent.com/songningying-png/demo-game/main/";
 const PLAYER_RUN_FRAME_MAX = 12;
 const PLAYER_JUMP_FRAME_MAX = 34;
 const buildNumberedFrames = (prefix, maxCount) =>
@@ -630,7 +629,7 @@ function createShader(gl, type, source) {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.warn('Wind overlay shader error:', gl.getShaderInfoLog(shader));
+        // Production build: silence shader compile diagnostics.
         gl.deleteShader(shader);
         return null;
     }
@@ -648,7 +647,7 @@ function createProgram(gl, vsSource, fsSource) {
     gl.deleteShader(vs);
     gl.deleteShader(fs);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-        console.warn('Wind overlay link error:', gl.getProgramInfoLog(p));
+        // Production build: silence program link diagnostics.
         gl.deleteProgram(p);
         return null;
     }
@@ -2034,7 +2033,7 @@ let windTransition = {
     armedAfterDrop: false,
     done: false
 };
-let debugWindHUD = true;
+let debugWindHUD = false;
 
 const VOID_FALL_MS = 20000;
 const VOID_BG1_START_MS = 10000;
